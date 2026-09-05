@@ -166,16 +166,5 @@ body.standalone .install-top-btn{display:none!important}
 @media(max-width:520px){.weather-metrics{grid-template-columns:repeat(2,1fr)}.weather-hours{gap:4px}.weather-hour{padding:6px 2px}.weather-actions{align-items:flex-start;flex-direction:column}.weather-actions .muted{text-align:left}.delta-map-summary{display:block}.delta-map-summary span{display:block;margin-top:3px}}
 
 
-/* v1.9 live timing */
-.live-session-banner{display:flex;align-items:center;justify-content:space-between;gap:16px}
-.live-session-banner .pill.live{background:rgba(255,35,43,.16);border-color:rgba(255,35,43,.45);color:#ff555b;animation:livepulse 1.8s ease-in-out infinite}
-@keyframes livepulse{0%,100%{opacity:1}50%{opacity:.62}}
-.session-row.live.clickable{cursor:pointer}
-.session-row.live.clickable:active{transform:scale(.99)}
-@media (prefers-reduced-motion:reduce){.live-session-banner .pill.live{animation:none}}
 
-/* v1.10.2 — safe live fallback */
-.live-embed-wrap{width:100%;height:min(72vh,820px);min-height:560px;border:1px solid #2b2b2b;border-radius:18px;overflow:hidden;background:#080808}
-.live-embed-wrap iframe{display:block;width:100%;height:100%;border:0;background:#080808}
-.live-fallback-card{overflow:hidden}
-@media (max-width:520px){.live-embed-wrap{height:68vh;min-height:500px;border-radius:14px}}
+

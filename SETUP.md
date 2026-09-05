@@ -51,3 +51,12 @@ Replace the changed files in the GitHub repository. GitHub Pages redeploys autom
 ## Native-widget change
 
 The native Android home-screen widget from the previous design is not possible in this web/PWA version. The app itself can be installed as a home-screen icon and still provides the next-session countdown on its home page.
+
+
+## v1.1 app-mode install
+
+On Android Chrome, F1 Hub now shows its own **Install F1 Hub** prompt when the PWA is eligible. Use that prompt, then launch F1 Hub from the new home-screen/app-drawer icon. In installed mode the Chrome address bar and browser menu are removed.
+
+If you previously installed/created a shortcut for v1.0, remove that shortcut, reload the GitHub Pages site once, then install v1.1 again so Android picks up the updated manifest.
+
+The Rain Radar button now opens an in-app Windy radar centred on the selected circuit. Driver photos use OpenF1 first and automatically fall back to Wikipedia/Wikimedia thumbnails when a current driver is missing or an F1 media image fails.

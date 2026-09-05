@@ -13,3 +13,5 @@ F1 Hub is an unofficial personal project and is not affiliated with Formula 1, t
 - F1DB circuit assets — used for newer layouts where specified; CC BY 4.0.
 
 No official F1 logo or official F1 typeface is included in the app.
+- Wikipedia / Wikimedia Commons — fallback driver profile images when the OpenF1/F1 media headshot is unavailable. The app links driver profiles back to their source page; individual image licences/credits remain available there.
+- Windy — embedded weather-radar map and full-radar links centred on circuit coordinates.

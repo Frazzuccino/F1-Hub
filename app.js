@@ -6,8 +6,10 @@ const JOLPICA = 'https://api.jolpi.ca/ergast/f1';
 const OPENF1 = 'https://api.openf1.org/v1';
 const F1_ARCHIVE = 'https://livetiming.formula1.com/static';
 const F1_LIVE_URL = 'https://www.formula1.com/en/timing/f1-live';
-const F1_LIVE_DATA_URL = 'https://f1livedata.com/custom';
-const FORMULA_TIMING_URL = 'https://formula-timing.com/';
+const F1_BOXBOX_URL = 'https://f1-boxbox.com/en/formula-1/live';
+const F1PEDIA_LIVE_URL = 'https://f1pedia.com/en/live-timing';
+const F1_DASHBOARD_URL = 'https://app.formula1dashboard.com/live-timing/';
+const F1_SIGNALR_CORE = 'https://livetiming.formula1.com/signalrcore';
 const LIVE_TIMING_API = 'https://f1-live-api.onrender.com';
 const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
 const NEWS_SOURCES = [
@@ -22,7 +24,7 @@ const PENALTY_SOURCE = 'https://racingnews365.com/penalty-points-f1-drivers';
 const REPRIMAND_SOURCE = 'https://timepenalty.com/guide/reprimand';
 const JINA = 'https://r.jina.ai/';
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
-const APP_VERSION = '1.11.1';
+const APP_VERSION = '1.11.2';
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -87,7 +89,7 @@ const FALLBACK_REPRIMANDS = {'Gabriel Bortoleto':1,'Oliver Bearman':1,'Alex Albo
 const state = {
   route:'home', schedule:[], drivers:[], constructors:[], photos:{}, wikiPhotos:{}, news:[], newsSource:'ALL', spoilerNewsRevealedRound:null, standingsSpoilerRevealedRound:null,
   penaltyPoints:{...FALLBACK_POINTS}, reprimands:{...FALLBACK_REPRIMANDS}, stewardDocs:{}, historyYear:YEAR-1, historyCache:{}, carUpdateDocs:{},
-  loaded:false, refreshing:false, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null, liveTimer:null
+  loaded:false, refreshing:false, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null, liveTimer:null, liveStop:null
 };
 const view = document.getElementById('view');
 
@@ -277,7 +279,7 @@ function parseReprimands(text){
 function parentNav(route){ if(route==='home'||route==='races'||route==='standings'||route==='news'||route==='more')return route; if(route.startsWith('race:')||route.startsWith('session:')||route.startsWith('telemetry:')||route.startsWith('carupdates:')||route.startsWith('circuit:')||route.startsWith('radar:'))return 'races'; return 'more'; }
 function setRoute(route,push=true){ if(!route)return; state.route=route; if(push && location.hash!==`#${encodeURIComponent(route)}`)history.pushState({route},'',`#${encodeURIComponent(route)}`); window.scrollTo({top:0,behavior:'instant'}); const parent=parentNav(route);document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',parent===b.dataset.route)); render(); }
 function render(){
-  clearInterval(state.countdownTimer);clearInterval(state.radarTimer);clearInterval(state.liveTimer);state.radarTimer=null;state.liveTimer=null;
+  clearInterval(state.countdownTimer);clearInterval(state.radarTimer);clearInterval(state.liveTimer);if(state.liveStop){try{state.liveStop();}catch{}state.liveStop=null;}state.radarTimer=null;state.liveTimer=null;
   view.classList.remove('view-enter');
   void view.offsetWidth;
   view.classList.add('view-enter');
@@ -641,23 +643,19 @@ function liveFindValues(obj,keyRx,depth=0,out=[]){
   return out;
 }
 function liveStatusValidation(status,r,s){
-  // Current f1-live-api exposes explicit live/stale flags. These are essential:
-  // the service intentionally restores the previous session state between sessions.
+  // This relay persists its previous session. Require explicit freshness/session proof.
   if(status?.connected!==true||status?.live!==true||status?.stale===true){
     const e=new Error(status?.stale_reason||'relay-not-live');e.code='relay-not-live';throw e;
   }
-
   const updatedAt=new Date(status?.last_update||'').getTime();
   if(!Number.isFinite(updatedAt)||Date.now()-updatedAt>90000){
     const e=new Error('relay-stale');e.code='relay-stale';throw e;
   }
-
   const expected=liveExpectedAliases(s);
   const actualSession=liveNormText(status?.session?.Name||status?.session?.SessionName||status?.session?.Type||'');
   if(!actualSession||!expected.some(a=>actualSession===a||actualSession.includes(a)||a.includes(actualSession))){
     const e=new Error('relay-wrong-session');e.code='relay-wrong-session';e.actual=actualSession;throw e;
   }
-
   const meeting=[status?.session?.Meeting?.Name,status?.session?.Meeting?.OfficialName,status?.session?.Meeting?.Location,status?.session?.Meeting?.Country?.Name]
     .map(archiveNorm).filter(Boolean);
   const wanted=[r?.raceName,r?.Circuit?.circuitName,r?.Circuit?.Location?.locality,r?.Circuit?.Location?.country]
@@ -680,8 +678,6 @@ function livePayloadValidation(payload,r,s){
   return rows;
 }
 async function fetchLiveFallbackRows(r,s){
-  // The public relay persists its last session to disk. Never accept /timing by itself:
-  // first prove the upstream socket is connected, fresh and on the session the user opened.
   const status=await fetchLiveJSON(`${LIVE_TIMING_API}/status`,7500);
   liveStatusValidation(status,r,s);
   const j=await fetchLiveJSON(`${LIVE_TIMING_API}/timing`,7500);
@@ -697,42 +693,207 @@ function liveTimingRows(payload){
   return (rows||[]).filter(Boolean).slice().sort((a,b)=>Number(a.position??a.Position??99)-Number(b.position??b.Position??99));
 }
 function liveField(x,...keys){for(const k of keys){if(x?.[k]!==undefined&&x?.[k]!==null&&x?.[k]!=='' )return x[k];}return null;}
+function liveScalar(v){
+  if(v==null)return '';
+  if(typeof v==='object')return v.Value??v.value??v.Time??v.time??'';
+  return v;
+}
 function liveTimingTable(rows){
   if(!rows.length)return '<div class="card"><div class="empty">Live timing has not started publishing yet.</div></div>';
   return `<div class="card classification-card"><div class="classification-head"><span>POS</span><span>DRIVER</span><span>GAP / BEST</span></div><div class="classification-list">${rows.map(x=>{
     const pos=liveField(x,'position','Position')??'—',code=liveField(x,'acronym','name_acronym','Tla','RacingNumber')||liveField(x,'driver_number','DriverNumber')||'—';
     const name=liveField(x,'name','full_name','FullName','BroadcastName')||code,team=liveField(x,'team','team_name','TeamName')||'';
-    const gap=liveField(x,'gap_to_leader','GapToLeader','gap','Gap')??'',best=liveField(x,'best_lap_time','BestLapTime','bestLapTime')??'',last=liveField(x,'last_lap_time','LastLapTime','lastLapTime')??'';
-    const compound=liveField(x,'tyre_compound','Compound','compound')||'',tyreLaps=liveField(x,'tyre_laps','TyreLaps','tyre_life')??'';
+    const gap=liveScalar(liveField(x,'gap_to_leader','GapToLeader','gap','Gap'))??'',best=liveScalar(liveField(x,'best_lap_time','BestLapTime','bestLapTime'))??'',last=liveScalar(liveField(x,'last_lap_time','LastLapTime','lastLapTime'))??'';
+    const compound=liveField(x,'tyre_compound','Compound','compound')||'',tyreLaps=liveField(x,'tyre_laps','TyreLaps','tyre_life','TotalLaps')??'';
+    const inPit=Boolean(liveField(x,'in_pit','InPit')),pitOut=Boolean(liveField(x,'pit_out','PitOut'));
+    const status=inPit?' · PIT':pitOut?' · OUT':'';
     const right=(String(pos)==='1'?(best||last||'LEADER'):(gap||best||last||'—'));
     const tyre=compound?` · ${String(compound).toUpperCase()}${tyreLaps!==''?` ${tyreLaps}L`:''}`:'';
     const col=liveField(x,'team_colour','team_color','TeamColour');
-    return `<div class="classification-row ${String(pos)==='1'?'winner':''}"><div class="class-pos">${esc(pos)}</div><div class="driver-line"><i class="team-dot" style="background:${col?'#'+String(col).replace('#',''):teamColour(team)}"></i><div><div class="driver-name">${esc(code)} · ${esc(name)}</div><div class="driver-meta">${esc(team)}${esc(tyre)}</div></div></div><div class="class-time">${esc(right)}${last&&last!==right?`<small class="class-gap">LAST ${esc(last)}</small>`:''}</div></div>`;
+    return `<div class="classification-row ${String(pos)==='1'?'winner':''}"><div class="class-pos">${esc(pos)}</div><div class="driver-line"><i class="team-dot" style="background:${col?'#'+String(col).replace('#',''):teamColour(team)}"></i><div><div class="driver-name">${esc(code)} · ${esc(name)}</div><div class="driver-meta">${esc(team)}${esc(tyre)}${esc(status)}</div></div></div><div class="class-time">${esc(right)}${last&&last!==right?`<small class="class-gap">LAST ${esc(last)}</small>`:''}</div></div>`;
   }).join('')}</div></div>`;
 }
+
+// --- Direct Formula 1 SignalR Core client ------------------------------------
+// F1 BOXBOX proves this data is obtainable during the session. Rather than scrape
+// their rendered page, F1 Hub first tries the same official live-timing family
+// directly from the user's own browser/IP. This avoids the cloud-host WAF problem
+// that can make public relays stale or unavailable.
+const DIRECT_F1_TOPICS=['Heartbeat','DriverList','ExtrapolatedClock','RaceControlMessages','SessionInfo','SessionStatus','TimingAppData','TimingStats','TrackStatus','WeatherData','SessionData','TimingData','TopThree','LapCount','CurrentTyres'];
+const SIGNALR_RS='\x1e';
+function liveDeepMerge(target,patch){
+  if(patch===null||typeof patch!=='object')return patch;
+  if(Array.isArray(target)){
+    const out=target.slice();
+    if(Array.isArray(patch)){patch.forEach((v,i)=>{out[i]=liveDeepMerge(out[i],v);});return out;}
+    for(const [k,v] of Object.entries(patch)){
+      if(/^\d+$/.test(k))out[Number(k)]=liveDeepMerge(out[Number(k)],v);
+      else out[k]=liveDeepMerge(out[k],v);
+    }
+    return out;
+  }
+  if(Array.isArray(patch))return patch.map((v,i)=>liveDeepMerge(Array.isArray(target)?target[i]:undefined,v));
+  const out=(target&&typeof target==='object'&&!Array.isArray(target))?{...target}:{};
+  for(const [k,v] of Object.entries(patch))out[k]=liveDeepMerge(out[k],v);
+  return out;
+}
+function liveIndexedValues(v){
+  if(Array.isArray(v))return v.filter(x=>x!=null);
+  if(v&&typeof v==='object')return Object.entries(v).sort((a,b)=>Number(a[0])-Number(b[0])).map(x=>x[1]).filter(x=>x!=null);
+  return [];
+}
+function liveDirectSessionMatches(snapshot,r,s){
+  const si=snapshot.SessionInfo||{};
+  const actual=liveNormText(si.Name||si.SessionName||si.Type||'');
+  const expected=liveExpectedAliases(s);
+  if(!actual||!expected.some(a=>actual===a||actual.includes(a)||a.includes(actual)))return false;
+  const meeting=[si?.Meeting?.Name,si?.Meeting?.OfficialName,si?.Meeting?.Location,si?.Meeting?.Country?.Name]
+    .map(archiveNorm).filter(Boolean);
+  const wanted=[r?.raceName,r?.Circuit?.circuitName,r?.Circuit?.Location?.locality,r?.Circuit?.Location?.country]
+    .map(archiveNorm).filter(x=>x.length>3);
+  return !(meeting.length&&wanted.length&&!meeting.some(v=>wanted.some(a=>v.includes(a)||a.includes(v))));
+}
+function liveDirectRows(snapshot){
+  const timing=snapshot.TimingData||{},lines=timing.Lines||{};
+  const drivers=snapshot.DriverList||{};
+  const appLines=snapshot.TimingAppData?.Lines||{};
+  return Object.entries(lines).map(([num,line])=>{
+    if(!line||typeof line!=='object')return null;
+    const d=drivers[num]||drivers[String(line.RacingNumber||'')]||{};
+    const app=appLines[num]||{};
+    const stints=liveIndexedValues(app.Stints),stint=stints.at(-1)||{};
+    const stats=line.Stats||{};
+    const gap=liveScalar(line.GapToLeader)||liveScalar(stats.TimeDiffToFastest)||liveScalar(stats.TimeDiffToLeader)||'';
+    const interval=liveScalar(line.IntervalToPositionAhead)||liveScalar(stats.TimeDifftoPositionAhead)||'';
+    return {
+      position:line.Position??d.Position??99,
+      driver_number:d.RacingNumber||line.RacingNumber||num,
+      acronym:d.Tla||d.BroadcastName?.split(' ').at(-1)?.slice(0,3)||num,
+      name:d.FullName||d.BroadcastName||d.Tla||`Car ${num}`,
+      team:d.TeamName||'',team_colour:d.TeamColour||'',
+      gap_to_leader:gap,interval,
+      best_lap_time:liveScalar(line.BestLapTime),last_lap_time:liveScalar(line.LastLapTime),
+      tyre_compound:stint.Compound||'',tyre_laps:stint.TotalLaps??'',
+      in_pit:Boolean(line.InPit),pit_out:Boolean(line.PitOut),retired:Boolean(line.Retired),stopped:Boolean(line.Stopped)
+    };
+  }).filter(Boolean).sort((a,b)=>Number(a.position||99)-Number(b.position||99));
+}
+function liveDirectMetaHtml(snapshot){
+  const clock=snapshot.ExtrapolatedClock||{},weather=snapshot.WeatherData||{},track=snapshot.TrackStatus||{},status=snapshot.SessionStatus||{};
+  const remain=clock.Remaining||clock.remaining||'—';
+  const flag=track.Message||track.Status||track.status||'—';
+  const sess=status.Status||status.status||snapshot.SessionInfo?.Name||'LIVE';
+  const cells=[['SESSION',sess],['REMAINING',remain],['TRACK',flag],['AIR',weather.AirTemp?`${weather.AirTemp}°C`:'—'],['TRACK TEMP',weather.TrackTemp?`${weather.TrackTemp}°C`:'—'],['RAIN',String(weather.Rainfall??'')!==''?(String(weather.Rainfall)==='0'?'NO':'YES'):'—']];
+  return `<div class="card live-meta-card"><div class="facts">${cells.map(([k,v])=>`<div class="fact"><b>${esc(v)}</b><small>${esc(k)}</small></div>`).join('')}</div></div>`;
+}
+function startDirectF1Timing(r,s,{onRows,onState,onError}={}){
+  let stopped=false,ws=null,retry=null,ping=null,silence=null,backoff=3000,lastFeed=0,attempt=0,scheduling=false;
+  const snapshot={};
+  const stopSocket=()=>{if(ping){clearInterval(ping);ping=null;}if(silence){clearInterval(silence);silence=null;}if(ws){try{ws.close();}catch{}ws=null;}};
+  const schedule=(err)=>{
+    if(stopped||scheduling)return;
+    scheduling=true;stopSocket();
+    onError?.(err);
+    const wait=Math.min(backoff,20000);backoff=Math.min(backoff*1.7,20000);
+    clearTimeout(retry);retry=setTimeout(()=>{scheduling=false;connect();},wait);
+  };
+  const applyTopic=(topic,data)=>{
+    if(!topic||data==null)return;
+    const clean=String(topic).replace(/\.z$/,'');
+    // CarData/Position are intentionally not subscribed here, so all selected topics are plain JSON.
+    snapshot[clean]=liveDeepMerge(snapshot[clean],data);
+    lastFeed=Date.now();
+    if(liveDirectSessionMatches(snapshot,r,s)){
+      const rows=liveDirectRows(snapshot);
+      if(rows.length>=5)onRows?.(rows,snapshot);
+    }
+  };
+  const handleFrames=(raw)=>{
+    const frames=String(raw||'').split(SIGNALR_RS).filter(x=>x.trim());
+    for(const frame of frames){
+      let msg;try{msg=JSON.parse(frame);}catch{continue;}
+      if(msg.type===1&&msg.target==='feed'&&Array.isArray(msg.arguments)&&msg.arguments.length>=2)applyTopic(msg.arguments[0],msg.arguments[1]);
+      else if(msg.type===3&&msg.invocationId==='0'&&msg.result&&typeof msg.result==='object')for(const [topic,data] of Object.entries(msg.result))applyTopic(topic,data);
+      else if(msg.type===6&&ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:6})+SIGNALR_RS);
+      else if(msg.type===7)schedule(new Error('F1 stream closed'));
+    }
+  };
+  const connect=async()=>{
+    if(stopped)return;attempt++;onState?.('connecting',attempt);
+    try{
+      // FastF1 preflights this endpoint to receive the AWSALBCORS sticky-session cookie.
+      // Browsers manage that cookie automatically when credentials are allowed.
+      try{await fetch(`${F1_SIGNALR_CORE}/negotiate?negotiateVersion=1`,{method:'OPTIONS',credentials:'include',cache:'no-store'});}catch{}
+      const ctrl=new AbortController(),to=setTimeout(()=>ctrl.abort(),8000);
+      let res;
+      try{res=await fetch(`${F1_SIGNALR_CORE}/negotiate?negotiateVersion=1`,{method:'POST',credentials:'include',cache:'no-store',body:'{}',signal:ctrl.signal});}
+      finally{clearTimeout(to);}
+      if(!res.ok){const e=new Error(`F1 negotiate ${res.status}`);e.status=res.status;throw e;}
+      const neg=await res.json(),token=neg.connectionToken||neg.connectionId;
+      if(!token)throw new Error('F1 negotiate returned no connection token');
+      if(stopped)return;
+      ws=new WebSocket(`wss://livetiming.formula1.com/signalrcore?id=${encodeURIComponent(token)}`);
+      let handshake=false,openTimer=setTimeout(()=>{if(!handshake)schedule(new Error('F1 WebSocket timeout'));},9000);
+      ws.onopen=()=>{if(stopped)return;onState?.('socket',attempt);ws.send(JSON.stringify({protocol:'json',version:1})+SIGNALR_RS);};
+      ws.onmessage=ev=>{
+        if(stopped)return;
+        const raw=String(ev.data||'');
+        if(!handshake){
+          const frames=raw.split(SIGNALR_RS).filter(x=>x.trim());let h={};try{h=frames[0]?JSON.parse(frames[0]):{};}catch{}
+          if(h.error){clearTimeout(openTimer);schedule(new Error(h.error));return;}
+          handshake=true;clearTimeout(openTimer);backoff=3000;lastFeed=Date.now();onState?.('connected',attempt);
+          ws.send(JSON.stringify({type:1,invocationId:'0',target:'Subscribe',arguments:[DIRECT_F1_TOPICS]})+SIGNALR_RS);
+          ping=setInterval(()=>{if(ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:6})+SIGNALR_RS);},15000);
+          silence=setInterval(()=>{if(lastFeed&&Date.now()-lastFeed>45000)schedule(new Error('F1 stream silent'));},5000);
+          if(frames.length>1)handleFrames(frames.slice(1).join(SIGNALR_RS)+SIGNALR_RS);
+          return;
+        }
+        handleFrames(raw);
+      };
+      ws.onerror=()=>{if(!stopped&&!handshake)schedule(new Error('F1 WebSocket blocked'));};
+      ws.onclose=()=>{if(!stopped)schedule(new Error('F1 WebSocket disconnected'));};
+    }catch(e){schedule(e);}
+  };
+  connect();
+  return ()=>{stopped=true;clearTimeout(retry);stopSocket();};
+}
 function liveFallbackPanel(){
-  return `<div class="card live-fallback-card"><div class="eyebrow">FREE LIVE FALLBACK</div><div class="card-title">F1 Live Data</div><div class="muted">The relay is not currently proving that it has this exact live session. F1 Hub will not show saved data from an earlier session as live. The free dashboard below is the fallback.</div><div class="spacer"></div><div class="live-embed-wrap"><iframe src="${F1_LIVE_DATA_URL}" title="F1 Live Data live timing" loading="eager" referrerpolicy="no-referrer-when-downgrade" allow="fullscreen"></iframe></div><div class="spacer"></div><div class="actions"><a class="external-btn red" href="${F1_LIVE_DATA_URL}" target="_blank" rel="noopener">OPEN F1 LIVE DATA ↗</a><a class="external-btn" href="${FORMULA_TIMING_URL}" target="_blank" rel="noopener">FORMULA-TIMING ↗</a><a class="external-btn" href="${F1_LIVE_URL}" target="_blank" rel="noopener">OFFICIAL F1 ↗</a></div><div class="source-note compact">If the embedded site refuses to display, use OPEN F1 LIVE DATA. F1 Hub continues checking the validated relay in the background.</div></div>`;
+  return `<div class="card live-fallback-card"><div class="eyebrow">LIVE FALLBACK</div><div class="card-title">Open a working live timing page</div><div class="muted">F1 Hub is still retrying both the direct Formula 1 stream and the validated relay. It will switch back to the in-app table automatically if either becomes available.</div><div class="spacer"></div><div class="actions"><a class="external-btn red" href="${F1_BOXBOX_URL}" target="_blank" rel="noopener">OPEN F1 BOXBOX ↗</a><a class="external-btn" href="${F1PEDIA_LIVE_URL}" target="_blank" rel="noopener">F1PEDIA ↗</a><a class="external-btn" href="${F1_DASHBOARD_URL}" target="_blank" rel="noopener">F1 DASHBOARD ↗</a><a class="external-btn" href="${F1_LIVE_URL}" target="_blank" rel="noopener">OFFICIAL F1 ↗</a></div><div class="source-note compact">F1 BOXBOX is used as a manual fallback page, not scraped. The native table uses Formula 1 timing data directly when the browser connection succeeds.</div></div>`;
 }
 function renderLiveSession(r,s){
-  view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('race:${r.round}')">← WEEKEND</button></div><div class="spacer"></div>${titleBlock(`${flag(r.Circuit.Location.country)} ${r.raceName}`,`${s.name} · LIVE`)}<div class="card live-session-banner"><div><div class="eyebrow">LIVE TIMING</div><div class="card-title">Validated current-session data only</div><div class="muted">F1 Hub checks the source connection, timestamp and session before showing a timing table. Stale data from another session is rejected.</div></div><span class="pill live">LIVE</span></div><div class="spacer"></div><div id="live-session-root"><div class="loader">Checking the current live feed…</div></div><div class="spacer"></div><div id="live-fallback-root"></div>`;
+  view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('race:${r.round}')">← WEEKEND</button></div><div class="spacer"></div>${titleBlock(`${flag(r.Circuit.Location.country)} ${r.raceName}`,`${s.name} · LIVE`)}<div class="card live-session-banner"><div><div class="eyebrow">LIVE TIMING</div><div class="card-title">Direct Formula 1 feed first</div><div class="muted">F1 Hub now tries the official live stream directly from this phone, then falls back to the validated relay. Old session data is never labelled LIVE.</div></div><span class="pill live">LIVE</span></div><div class="spacer"></div><div id="live-session-root"><div class="loader">Connecting directly to Formula 1 live timing…</div></div><div class="spacer"></div><div id="live-fallback-root"></div>`;
   const root=document.getElementById('live-session-root'),fallback=document.getElementById('live-fallback-root');
-  let busy=false,lastGoodHtml='',lastGoodAt=0;
-  const load=async(manual=false)=>{
-    if(busy||state.route!==`session:${r.round}:${s.key}`)return;
-    busy=true;if(manual)root.innerHTML='<div class="loader">Checking the current live feed…</div>';
+  let relayBusy=false,lastGoodHtml='',lastGoodAt=0,directGoodAt=0,directState='connecting',lastError='';
+  const showFailure=()=>{
+    if(directGoodAt&&Date.now()-directGoodAt<45000)return;
+    const sameSessionStale=lastGoodHtml&&Date.now()-lastGoodAt<120000;
+    if(sameSessionStale)root.innerHTML=lastGoodHtml+`<div class="source-note compact"><b>STALE · SAME SESSION</b> · Feed paused; reconnecting automatically.</div>`;
+    else root.innerHTML=`<div class="card"><div class="empty">No in-app source is currently passing F1 Hub's live-session checks.${lastError?`<br><br><small>${esc(lastError)}</small>`:''}</div><div class="spacer"></div><button id="live-retry" class="external-btn red">CHECK AGAIN</button></div>`;
+    fallback.innerHTML=liveFallbackPanel();
+    const b=document.getElementById('live-retry');if(b)b.onclick=()=>{fallback.innerHTML='';root.innerHTML='<div class="loader">Reconnecting to live timing…</div>';relayLoad(true);};
+  };
+  const relayLoad=async(manual=false)=>{
+    if(relayBusy||state.route!==`session:${r.round}:${s.key}`)return;
+    relayBusy=true;
     try{
       const result=await fetchLiveFallbackRows(r,s);
+      if(directGoodAt&&Date.now()-directGoodAt<20000)return;
       lastGoodHtml=liveTimingTable(result.rows);lastGoodAt=Date.now();
       root.innerHTML=lastGoodHtml+liveSourceNote(result.source,result.detail);fallback.innerHTML='';
-    }catch(e){
-      const sameSessionStale=lastGoodHtml&&Date.now()-lastGoodAt<120000;
-      if(sameSessionStale)root.innerHTML=lastGoodHtml+`<div class="source-note compact"><b>STALE · SAME SESSION</b> · Feed paused; checking again automatically.</div>`;
-      else root.innerHTML=`<div class="card"><div class="empty">No browser-readable source has passed F1 Hub's current-session checks. Old results will not be labelled LIVE.</div><div class="spacer"></div><button id="live-retry" class="external-btn red">CHECK AGAIN</button></div>`;
-      fallback.innerHTML=liveFallbackPanel();
-      const b=document.getElementById('live-retry');if(b)b.onclick=()=>load(true);
-    }finally{busy=false;}
+    }catch(e){lastError=e?.message||String(e);if(!directGoodAt||Date.now()-directGoodAt>45000)showFailure();}
+    finally{relayBusy=false;}
   };
-  load();state.liveTimer=setInterval(load,8000);
+  state.liveStop=startDirectF1Timing(r,s,{
+    onState:(st)=>{directState=st;if(st==='connected'&&!directGoodAt)root.innerHTML='<div class="loader">Connected to Formula 1 · waiting for current-session timing…</div>';},
+    onRows:(rows,snapshot)=>{
+      if(state.route!==`session:${r.round}:${s.key}`)return;
+      directGoodAt=Date.now();lastGoodAt=directGoodAt;
+      lastGoodHtml=liveDirectMetaHtml(snapshot)+`<div class="spacer"></div>`+liveTimingTable(rows);
+      root.innerHTML=lastGoodHtml+liveSourceNote('DIRECT F1 SIGNALR',`${s.name} · phone connection`);fallback.innerHTML='';
+    },
+    onError:(e)=>{lastError=e?.message||String(e);if(!directGoodAt||Date.now()-directGoodAt>45000)showFailure();}
+  });
+  relayLoad();state.liveTimer=setInterval(relayLoad,10000);
 }
 
 async function renderSessionResult(round,key){

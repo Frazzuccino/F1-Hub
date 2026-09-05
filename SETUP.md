@@ -1,4 +1,4 @@
-# F1 Hub v1.11.1 — update / install
+# F1 Hub v1.11.2 — update / install
 
 ## Update GitHub Pages
 1. Replace the files in your existing F1 Hub GitHub Pages repository with everything in this folder.
@@ -6,18 +6,18 @@
 3. Commit the change and wait for GitHub Pages to redeploy.
 
 ## Force the latest version once
-Open your F1 Hub URL once with `?v=1111` on the end. In **More**, the footer should say **F1 Hub v1.11.1**.
+Open your F1 Hub URL once with `?v=1112` on the end. In **More**, the footer should say **F1 Hub v1.11.2**.
 
-## Fixed in v1.11.1
+## New in v1.11.2
 
-- Lap Delta now uses the selected drivers’ official lap durations to normalise the telemetry trace. It starts at 0.000 s and finishes at the exact Driver A minus Driver B lap-time difference, so the sign always agrees with which selected lap was faster.
-- Live Timing still refuses saved/demo timing as live, but now re-checks the validated relay every 8 seconds instead of every 15 seconds.
-- Live Timing requires the relay to prove: connected upstream, live session, not stale, recent upstream update, correct session, and (when available) the correct meeting.
-- Telemetry now uses a proper two-source chain for every season including 2026: OpenF1 historical telemetry first, then Formula 1's official `CarData.z` / `Position.z` timing archive.
-- The official archive parser now accepts both array/object update containers and searches a longer section of the stream for its UTC timebase.
-- If Formula 1's static archive is blocked by the browser/network, F1 Hub can fall back to a free AllOrigins read-through for the same public static text files.
-- Archive session-path discovery can also fall back to the validated live relay's F1 archive index when the Formula 1 yearly index itself is blocked.
-- No stale Formula-Timing / F1 Live Data HTML table is scraped into F1 Hub as live timing. Those remain external/dashboard fallbacks only.
+- Live Timing now tries Formula 1's official SignalR Core timing stream **directly from the phone/browser first**. This avoids relying entirely on a cloud relay, which can be blocked by F1's live-timing WAF while a normal residential/mobile connection still works.
+- The direct client negotiates the F1 SignalR connection, performs the SignalR JSON handshake, subscribes to `TimingData`, `DriverList`, `TimingAppData`, `SessionInfo`, `WeatherData`, `LapCount` and related timing topics, then deep-merges F1's delta updates in the browser.
+- The in-app table is only shown when the direct stream identifies the correct session and meeting. Previous-session snapshots are rejected.
+- If the direct browser connection is blocked, F1 Hub still tries the existing validated public relay every 10 seconds.
+- The broken embedded F1 Live Data iframe has been removed.
+- F1 BOXBOX is now the first external fallback button, followed by F1pedia, Formula 1 Dashboard and the official F1 timing page. F1 BOXBOX is **not scraped**; it is only opened as a fallback.
+- When direct timing works, the screen also shows session status/remaining time plus track and weather data from the same F1 stream.
+- The v1.11.1 lap-delta normalisation fix is retained.
 
 ## Important
-F1 Hub remains a static GitHub Pages app with no paid API key and no self-hosted backend. Free public sources can still be temporarily unavailable. The app now fails closed rather than showing an old timing table as LIVE.
+The direct F1 stream is unofficial/undocumented and Formula 1 can change or restrict it at any time. F1 Hub therefore keeps multiple fallbacks and still fails closed rather than presenting stale data as LIVE.

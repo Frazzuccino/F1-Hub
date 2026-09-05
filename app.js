@@ -4,6 +4,10 @@ const YEAR = new Date().getFullYear();
 const UK_TZ = 'Europe/London';
 const JOLPICA = 'https://api.jolpi.ca/ergast/f1';
 const OPENF1 = 'https://api.openf1.org/v1';
+const F1_ARCHIVE = 'https://livetiming.formula1.com/static';
+const F1_LIVE_URL = 'https://www.formula1.com/en/timing/f1-live';
+const F1_LIVE_DATA_URL = 'https://f1livedata.com/custom';
+const FORMULA_TIMING_URL = 'https://formula-timing.com/';
 const LIVE_TIMING_API = 'https://f1-live-api.onrender.com';
 const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
 const NEWS_SOURCES = [
@@ -18,7 +22,7 @@ const PENALTY_SOURCE = 'https://racingnews365.com/penalty-points-f1-drivers';
 const REPRIMAND_SOURCE = 'https://timepenalty.com/guide/reprimand';
 const JINA = 'https://r.jina.ai/';
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
-const APP_VERSION = '1.9.1';
+const APP_VERSION = '1.10.1';
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -602,6 +606,94 @@ async function fetchLiveJSON(url,timeoutMs=18000){
   try{const r=await fetch(url,{signal:c.signal,cache:'no-store'});if(!r.ok){const e=new Error(String(r.status));e.status=r.status;throw e;}return await r.json();}
   finally{clearTimeout(t);}
 }
+
+async function fetchLiveText(url,timeoutMs=12000){
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),timeoutMs);
+  try{const r=await fetch(url,{signal:c.signal,cache:'no-store'});if(!r.ok){const e=new Error(String(r.status));e.status=r.status;throw e;}return await r.text();}
+  finally{clearTimeout(t);}
+}
+function normaliseCompound(v=''){
+  const s=String(v).toUpperCase();
+  if(/\bSOFT\b/.test(s)||/^\s*S\b/.test(s))return 'SOFT';
+  if(/\bMEDIUM\b/.test(s)||/^\s*M\b/.test(s))return 'MEDIUM';
+  if(/\bHARD\b/.test(s)||/^\s*H\b/.test(s))return 'HARD';
+  if(/\bINTER/.test(s)||/^\s*I\b/.test(s))return 'INTERMEDIATE';
+  if(/\bWET\b/.test(s)||/^\s*W\b/.test(s))return 'WET';
+  return '';
+}
+function parseF1LiveDataMarkdown(text){
+  const lines=String(text||'').split(/\r?\n/);
+  const start=Math.max(0,lines.findIndex(x=>/\bLEADERBOARD\b/i.test(x)));
+  const rows=[];
+  for(let i=start;i<Math.min(lines.length,start+180);i++){
+    const raw=lines[i].trim();
+    if(!raw.includes('|'))continue;
+    const clean=raw.replace(/^\|/,'').replace(/\|$/,'');
+    const p=clean.split('|').map(x=>x.trim());
+    if(!/^\d+$/.test(p[0]||''))continue;
+    const code=((p[1]||'').match(/\b[A-Z]{3}\b/g)||[]).pop()||(p[1]||'').replace(/[^A-Za-z0-9]/g,'').slice(-3).toUpperCase();
+    if(!code)continue;
+    const timeCell=p[3]||'';
+    const best=(timeCell.match(/\d+:\d{2}\.\d{3}/)||[])[0]||timeCell.replace(/^[A-Z]\s+/,'').trim();
+    rows.push({
+      position:Number(p[0]),acronym:code,name:code,
+      gap_to_leader:p[2]||'',best_lap_time:best,
+      tyre_compound:normaliseCompound(timeCell)
+    });
+  }
+  return rows;
+}
+function parseFormulaTimingMarkdown(text){
+  const lines=String(text||'').split(/\r?\n/);
+  const start=Math.max(0,lines.findIndex(x=>/Driver\s*\|\s*Best Lap\s*\|\s*Gap/i.test(x)));
+  const rows=[];
+  for(let i=start;i<Math.min(lines.length,start+160);i++){
+    const raw=lines[i].trim();
+    if(!raw.includes('|'))continue;
+    const p=raw.replace(/^\|/,'').replace(/\|$/,'').split('|').map(x=>x.trim());
+    const lead=(p[0]||'').match(/^(\d+)/);
+    if(!lead)continue;
+    const code=((p[0]||'').match(/([A-Z]{3})\s*$/)||[])[1]||((p[0]||'').match(/\b[A-Z]{3}\b/g)||[]).pop();
+    if(!code)continue;
+    rows.push({
+      position:Number(lead[1]),acronym:code,name:code,
+      best_lap_time:(p[1]||'').trim(),gap_to_leader:(p[2]||'').trim(),
+      tyre_compound:normaliseCompound(p[3]||'')
+    });
+  }
+  return rows;
+}
+async function fetchSnapshotViaJina(targetUrl,parser,timeoutMs=14000){
+  const stamp=Math.floor(Date.now()/20000);
+  const sep=targetUrl.includes('?')?'&':'?';
+  const proxy=`${JINA}${targetUrl}${sep}f1hub=${stamp}`;
+  const text=await fetchLiveText(proxy,timeoutMs);
+  const rows=parser(text);
+  if(!rows.length)throw new Error('empty-snapshot');
+  return rows;
+}
+async function fetchLiveFallbackRows(){
+  const errors=[];
+  try{
+    const j=await fetchLiveJSON(`${LIVE_TIMING_API}/timing`,5500);
+    const rows=liveTimingRows(j);
+    if(rows.length)return {rows,source:'COMMUNITY RELAY',detail:'Live relay'};
+    errors.push('relay empty');
+  }catch(e){errors.push(`relay ${e?.message||'failed'}`);}
+  try{
+    const rows=await fetchSnapshotViaJina(FORMULA_TIMING_URL,parseFormulaTimingMarkdown,8000);
+    return {rows,source:'FORMULA-TIMING',detail:'Free web snapshot · may lag slightly'};
+  }catch(e){errors.push(`Formula-Timing ${e?.message||'failed'}`);}
+  try{
+    const rows=await fetchSnapshotViaJina(F1_LIVE_DATA_URL,parseF1LiveDataMarkdown,8000);
+    return {rows,source:'F1 LIVE DATA',detail:'Free web snapshot · may lag slightly'};
+  }catch(e){errors.push(`F1 Live Data ${e?.message||'failed'}`);}
+  const err=new Error('all-live-sources-failed');err.sources=errors;throw err;
+}
+function liveSourceNote(source,detail=''){
+  const now=new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:UK_TZ}).format(new Date());
+  return `<div class="source-note compact"><b>SOURCE · ${esc(source)}</b>${detail?` · ${esc(detail)}`:''} · Updated ${now}</div>`;
+}
 function liveTimingRows(payload){
   const rows=Array.isArray(payload)?payload:(payload?.drivers||payload?.timing||payload?.data||[]);
   return (rows||[]).filter(Boolean).slice().sort((a,b)=>Number(a.position??a.Position??99)-Number(b.position??b.Position??99));
@@ -621,25 +713,31 @@ function liveTimingTable(rows){
   }).join('')}</div></div>`;
 }
 function renderLiveSession(r,s){
-  view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('race:${r.round}')">← WEEKEND</button></div><div class="spacer"></div>${titleBlock(`${flag(r.Circuit.Location.country)} ${r.raceName}`,`${s.name} · LIVE`)}<div class="card live-session-banner"><div><div class="eyebrow">LIVE TIMING</div><div class="card-title">Updating automatically</div><div class="muted">The free relay can take up to a minute to wake on the first connection.</div></div><span class="pill live">LIVE</span></div><div class="spacer"></div><div id="live-session-root"><div class="loader">Waking live timing feed…</div></div><div class="source-note">Live timing uses an unofficial community relay of Formula 1's public timing stream. It is not guaranteed to be available. Reliable live timing would require a paid OpenF1 live subscription or a small always-on backend.</div>`;
-  const root=document.getElementById('live-session-root');let busy=false,first=true,failures=0;
+  view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('race:${r.round}')">← WEEKEND</button></div><div class="spacer"></div>${titleBlock(`${flag(r.Circuit.Location.country)} ${r.raceName}`,`${s.name} · LIVE`)}<div class="card live-session-banner"><div><div class="eyebrow">LIVE TIMING</div><div class="card-title">Automatic source fallback</div><div class="muted">F1 Hub tries several free sources in order. If one stops responding it automatically moves to the next available source.</div></div><span class="pill live">LIVE</span></div><div class="spacer"></div><div id="live-session-root"><div class="loader">Finding a live timing source…</div></div><div class="spacer"></div><div class="card"><div class="eyebrow">DIRECT FALLBACKS</div><div class="card-title">Open a full live dashboard</div><div class="muted">If none of the free sources can be read inside F1 Hub, these remain available directly.</div><div class="spacer"></div><div class="actions"><a class="external-btn red" href="${F1_LIVE_DATA_URL}" target="_blank" rel="noopener">F1 LIVE DATA ↗</a><a class="external-btn" href="${FORMULA_TIMING_URL}" target="_blank" rel="noopener">FORMULA-TIMING ↗</a><a class="external-btn" href="${F1_LIVE_URL}" target="_blank" rel="noopener">OFFICIAL F1 ↗</a></div></div><div class="source-note">Free third-party timing sources can lag, change format or become unavailable. F1 Hub keeps the latest valid table on screen while it tries another source.</div>`;
+  const root=document.getElementById('live-session-root');
+  let busy=false,lastGoodHtml='',lastGoodSource='',failures=0;
   const retryButton=()=>{const b=document.getElementById('live-retry');if(b)b.onclick=()=>load(true);};
   const load=async(manual=false)=>{
-    if(busy||state.route!==`session:${r.round}:${s.key}`)return;busy=true;
-    if(manual)root.innerHTML='<div class="loader">Retrying live timing…</div>';
+    if(busy||state.route!==`session:${r.round}:${s.key}`)return;
+    busy=true;
+    if(manual&&!lastGoodHtml)root.innerHTML='<div class="loader">Trying all live timing sources…</div>';
     try{
-      const timeout=first?65000:22000;
-      if(first){try{await fetchLiveJSON(`${LIVE_TIMING_API}/status`,timeout);}catch{}}
-      const j=await fetchLiveJSON(`${LIVE_TIMING_API}/timing`,timeout);
-      const rows=liveTimingRows(j);if(!rows.length)throw new Error('empty-live');
-      failures=0;
-      root.innerHTML=liveTimingTable(rows)+`<div class="source-note compact">Updated ${new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:UK_TZ}).format(new Date())}</div>`;
+      const result=await fetchLiveFallbackRows();
+      failures=0;lastGoodSource=result.source;
+      lastGoodHtml=liveTimingTable(result.rows);
+      root.innerHTML=lastGoodHtml+liveSourceNote(result.source,result.detail);
     }catch(e){
       failures++;
-      root.innerHTML=`<div class="card"><div class="empty">The free live-timing relay is not responding right now. F1 Hub will keep trying, but this source can occasionally be unavailable during a session.</div><div class="spacer"></div><button id="live-retry" class="external-btn red">RETRY NOW</button></div>`;retryButton();
-    }finally{first=false;busy=false;}
+      if(lastGoodHtml){
+        root.innerHTML=lastGoodHtml+`<div class="source-note compact"><b>STALE · ${esc(lastGoodSource||'LAST GOOD DATA')}</b> · Live sources are temporarily unavailable; F1 Hub will keep retrying.</div>`;
+      }else{
+        root.innerHTML=`<div class="card"><div class="empty">None of the free live timing sources is responding inside F1 Hub right now.</div><div class="spacer"></div><div class="actions"><button id="live-retry" class="external-btn red">TRY ALL SOURCES AGAIN</button><a class="external-btn" href="${F1_LIVE_DATA_URL}" target="_blank" rel="noopener">F1 LIVE DATA ↗</a><a class="external-btn" href="${FORMULA_TIMING_URL}" target="_blank" rel="noopener">FORMULA-TIMING ↗</a><a class="external-btn" href="${F1_LIVE_URL}" target="_blank" rel="noopener">OFFICIAL F1 ↗</a></div></div>`;
+        retryButton();
+      }
+    }finally{busy=false;}
   };
-  load();state.liveTimer=setInterval(load,8000);
+  load();
+  state.liveTimer=setInterval(load,15000);
 }
 
 async function renderSessionResult(round,key){
@@ -900,6 +998,108 @@ function openF1LiveWindow(os){
   const st=new Date(os?.date_start).getTime(),en=new Date(os?.date_end||os?.date_start).getTime();
   return Number.isFinite(st)&&Number.isFinite(en)&&Date.now()>=st-30*60e3&&Date.now()<=en+30*60e3;
 }
+function archiveNorm(v){return String(v||'').toLowerCase().replace(/grand\s+prix/g,'').replace(/[^a-z0-9]/g,'');}
+function archiveSessionAliases(s){
+  if(s.key==='sprintq')return ['sprintqualifying','sprintshootout'];
+  return [archiveNorm(s.openName||s.name)];
+}
+async function officialArchiveSession(r,s){
+  const idx=await fetchJSON(`${F1_ARCHIVE}/${YEAR}/Index.json`,`f1-archive-index-${YEAR}`,2*60e3,25000);
+  const meetings=idx?.Meetings||idx?.meetings||[];
+  const raceKey=archiveNorm(r.raceName),locKey=archiveNorm(r.Circuit?.Location?.locality||r.Circuit?.circuitName);
+  let meeting=meetings.find(m=>archiveNorm(m.Name||m.name)===raceKey);
+  if(!meeting)meeting=meetings.find(m=>{const n=archiveNorm(m.Name||m.name);return n&&raceKey&&(n.includes(raceKey)||raceKey.includes(n));});
+  if(!meeting&&locKey)meeting=meetings.find(m=>archiveNorm(m.Location||m.location||m.Circuit?.Name).includes(locKey));
+  if(!meeting)return null;
+  const aliases=archiveSessionAliases(s),list=meeting.Sessions||meeting.sessions||[];
+  let sess=list.find(x=>aliases.includes(archiveNorm(x.Name||x.Type||x.name||x.type)));
+  if(!sess&&s.key==='race')sess=list.find(x=>archiveNorm(x.Type||x.Name)==='race');
+  if(!sess)return null;
+  const path=String(sess.Path||sess.path||'').replace(/^\/+/, '');
+  if(!path)return null;
+  return {path,base:`${F1_ARCHIVE}/${path.endsWith('/')?path:path+'/'}`,session:sess,meeting};
+}
+async function archiveFetchJSON(url,timeoutMs=30000){
+  const c=new AbortController(),timer=setTimeout(()=>c.abort(),timeoutMs);
+  try{const r=await fetch(url,{signal:c.signal,cache:'no-store'});if(!r.ok){const e=new Error(String(r.status));e.status=r.status;throw e;}const text=(await r.text()).replace(/^\uFEFF/,'');return JSON.parse(text);}
+  finally{clearTimeout(timer);}
+}
+async function archiveFetchLines(url,timeoutMs=90000){
+  state.archiveRawCache=state.archiveRawCache||{};
+  if(state.archiveRawCache[url])return state.archiveRawCache[url];
+  const c=new AbortController(),timer=setTimeout(()=>c.abort(),timeoutMs);
+  try{
+    const r=await fetch(url,{signal:c.signal,cache:'no-store'});if(!r.ok){const e=new Error(String(r.status));e.status=r.status;throw e;}
+    const text=await r.text(),lines=text.split(/\r?\n/).filter(Boolean);
+    state.archiveRawCache[url]=lines;return lines;
+  }finally{clearTimeout(timer);}
+}
+function archiveLineMeta(line){
+  const q1=line.indexOf('"');if(q1<1)return null;const q2=line.indexOf('"',q1+1);if(q2<0)return null;
+  const t=line.slice(0,q1).trim(),m=t.match(/^(\d+):(\d+):(\d+(?:\.\d+)?)$/);if(!m)return null;
+  return {elapsed:(Number(m[1])*3600+Number(m[2])*60+Number(m[3]))*1000,b64:line.slice(q1+1,q2)};
+}
+function base64Bytes(v){const bin=atob(v),out=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);return out;}
+async function inflateArchivePayload(b64){
+  if(typeof DecompressionStream==='undefined')throw new Error('browser-decompression');
+  const ds=new DecompressionStream('deflate-raw');
+  const stream=new Blob([base64Bytes(b64)]).stream().pipeThrough(ds);
+  const text=(await new Response(stream).text()).replace(/^\uFEFF/,'');
+  return JSON.parse(text);
+}
+function archivePayloadUtc(obj,kind){
+  if(kind==='car'){for(const e of obj?.Entries||[])if(e?.Utc)return e.Utc;}
+  if(kind==='pos'){for(const e of obj?.Position||[])if(e?.Timestamp||e?.Utc)return e.Timestamp||e.Utc;}
+  return null;
+}
+async function archiveTimeOffset(lines,kind){
+  for(let i=0;i<Math.min(lines.length,120);i++){
+    const meta=archiveLineMeta(lines[i]);if(!meta)continue;
+    try{const obj=await inflateArchivePayload(meta.b64),utc=archivePayloadUtc(obj,kind),ms=new Date(utc).getTime();if(Number.isFinite(ms))return ms-meta.elapsed;}catch{}
+  }
+  throw new Error('archive-timebase');
+}
+function archiveWindows(requests,padMs=45000){
+  return requests.map(q=>{const w=telemetryWindow(q.lap);return {driver:String(q.driver),start:w.exactStart-padMs,end:w.exactEnd+padMs,w};});
+}
+function archiveLineWanted(utcApprox,windows){return windows.some(w=>utcApprox>=w.start&&utcApprox<=w.end);}
+async function collectOfficialArchiveRows(lines,offset,requests,kind,onProgress){
+  const windows=archiveWindows(requests),drivers=[...new Set(requests.map(x=>String(x.driver)))],out=Object.fromEntries(drivers.map(d=>[d,[]]));
+  const selected=[];
+  for(const line of lines){const meta=archiveLineMeta(line);if(!meta)continue;if(archiveLineWanted(offset+meta.elapsed,windows))selected.push(meta);}
+  let done=0;
+  for(const meta of selected){
+    const obj=await inflateArchivePayload(meta.b64);done++;
+    if(onProgress&&done%80===0)onProgress(done,selected.length,kind);
+    if(kind==='car'){
+      for(const e of obj?.Entries||[]){const date=e?.Utc,t=new Date(date).getTime();if(!Number.isFinite(t))continue;for(const d of drivers){if(!windows.some(w=>w.driver===d&&t>=w.start&&t<=w.end))continue;const ch=e?.Cars?.[d]?.Channels;if(!ch)continue;out[d].push({date,rpm:Number(ch['0']),speed:Number(ch['2']),n_gear:Number(ch['3']),throttle:Number(ch['4']),brake:Number(ch['5'])>0?100:0,drs:Number(ch['45'])});}}
+    }else{
+      for(const e of obj?.Position||[]){const date=e?.Timestamp||e?.Utc,t=new Date(date).getTime();if(!Number.isFinite(t))continue;for(const d of drivers){if(!windows.some(w=>w.driver===d&&t>=w.start&&t<=w.end))continue;const p=e?.Entries?.[d];if(!p)continue;out[d].push({date,x:Number(p.X),y:Number(p.Y),z:Number(p.Z)});}}
+    }
+  }
+  return out;
+}
+async function fetchOfficialArchiveComparison(r,s,requests,onProgress){
+  const arc=await officialArchiveSession(r,s);if(!arc){const e=new Error('archive-not-ready');e.code='archive-not-ready';throw e;}
+  let idx;try{idx=await archiveFetchJSON(`${arc.base}Index.json`,30000);}catch(e){e.code=e.status===404?'archive-not-ready':'archive-fetch';throw e;}
+  const carPath=idx?.Feeds?.['CarData.z']?.StreamPath||idx?.feeds?.['CarData.z']?.StreamPath;
+  const posPath=idx?.Feeds?.['Position.z']?.StreamPath||idx?.feeds?.['Position.z']?.StreamPath;
+  if(!carPath){const e=new Error('archive-not-ready');e.code='archive-not-ready';throw e;}
+  onProgress?.(0,1,'download-car');
+  const carLines=await archiveFetchLines(`${arc.base}${carPath}`),carOffset=await archiveTimeOffset(carLines,'car');
+  const carBy=await collectOfficialArchiveRows(carLines,carOffset,requests,'car',onProgress);
+  let posBy=Object.fromEntries(requests.map(q=>[String(q.driver),[]]));
+  if(posPath){
+    try{onProgress?.(0,1,'download-pos');const posLines=await archiveFetchLines(`${arc.base}${posPath}`),posOffset=await archiveTimeOffset(posLines,'pos');posBy=await collectOfficialArchiveRows(posLines,posOffset,requests,'pos',onProgress);}catch{}
+  }
+  return requests.map(q=>{
+    const w=telemetryWindow(q.lap),d=String(q.driver);let car=lapRowsFromFullSession(carBy[d]||[],w.exactStart,w.duration),loc=lapRowsFromFullSession(posBy[d]||[],w.exactStart,w.duration);
+    if(car.length<8)return [];
+    const actualStart=new Date(car[0].date).getTime(),actualEnd=new Date(car.at(-1).date).getTime()+1500;
+    if(loc.length>=5)loc=sliceTelemetryRows(loc,actualStart-1500,actualEnd);
+    return buildTelemetrySeries(car,loc,actualStart);
+  });
+}
 function hexRgb(h){const x=h.replace('#','');return [parseInt(x.slice(0,2),16),parseInt(x.slice(2,4),16),parseInt(x.slice(4,6),16)];}
 function mixHex(a,b,t){const A=hexRgb(a),B=hexRgb(b),v=A.map((x,i)=>Math.round(x+(B[i]-x)*t));return '#'+v.map(x=>x.toString(16).padStart(2,'0')).join('');}
 function speedColour(v,min,max){
@@ -995,7 +1195,7 @@ async function renderTelemetry(round,key){
     available.sort((a,b)=>{const ai=resultOrder.indexOf(String(a.driver_number)),bi=resultOrder.indexOf(String(b.driver_number));return (ai<0?99:ai)-(bi<0?99:bi)||telemetryDriverName(a).localeCompare(telemetryDriverName(b));});
     const da=available[0],db=available[1]||available[0],fa=fastestLap(laps,da.driver_number),fb=fastestLap(laps,db.driver_number);
     const options=available.map(d=>`<option value="${esc(d.driver_number)}">${esc(telemetryDriverName(d))}</option>`).join('');
-    root.innerHTML=`<div class="card telemetry-controls"><div class="grid two"><label><div class="eyebrow">DRIVER A</div><select id="tel-driver-a">${options}</select></label><label><div class="eyebrow">DRIVER B</div><select id="tel-driver-b">${options}</select></label><label><div class="eyebrow">LAP A</div><select id="tel-lap-a"></select></label><label><div class="eyebrow">LAP B</div><select id="tel-lap-b"></select></label></div><div class="spacer"></div><button id="tel-load" class="external-btn red">LOAD COMPARISON</button></div><div id="telemetry-output"><div class="loader">Loading fastest laps…</div></div><div class="source-note">Post-session telemetry via OpenF1. Free access becomes available once a session is historical. Track position is approximate, so the coloured map is for speed visualisation rather than precise racing-line analysis.</div>`;
+    root.innerHTML=`<div class="card telemetry-controls"><div class="grid two"><label><div class="eyebrow">DRIVER A</div><select id="tel-driver-a">${options}</select></label><label><div class="eyebrow">DRIVER B</div><select id="tel-driver-b">${options}</select></label><label><div class="eyebrow">LAP A</div><select id="tel-lap-a"></select></label><label><div class="eyebrow">LAP B</div><select id="tel-lap-b"></select></label></div><div class="spacer"></div><button id="tel-load" class="external-btn red">LOAD COMPARISON</button></div><div id="telemetry-output"><div class="loader">Loading fastest laps…</div></div><div class="source-note">Lap selection uses OpenF1 timing data; speed, throttle, brake, gear, RPM and position are loaded from Formula 1’s official post-session timing archive. The archive appears after the session is finalised.</div>`;
     const sa=document.getElementById('tel-driver-a'),sb=document.getElementById('tel-driver-b'),la=document.getElementById('tel-lap-a'),lb=document.getElementById('tel-lap-b'),load=document.getElementById('tel-load'),output=document.getElementById('telemetry-output');
     sa.value=String(da.driver_number);sb.value=String(db.driver_number);
     const fillLaps=(sel,driver,chosen)=>{sel.innerHTML=lapSelectOptions(laps,driver,chosen);};
@@ -1005,21 +1205,24 @@ async function renderTelemetry(round,key){
       const na=sa.value,nb=sb.value,lpa=validTelemetryLaps(laps,na).find(x=>String(x.lap_number)===la.value),lpb=validTelemetryLaps(laps,nb).find(x=>String(x.lap_number)===lb.value);
       if(!lpa||!lpb)return;output.innerHTML='<div class="loader">Loading car and track data…</div>';load.disabled=true;
       try{
-        const A=await fetchLapTelemetry(os.session_key,na,lpa);const B=await fetchLapTelemetry(os.session_key,nb,lpb);
-        if(!A.length||!B.length)throw new Error('telemetry');
+        const progress=(n,total,kind)=>{const label=kind==='download-car'?'Downloading official car-data archive…':kind==='download-pos'?'Downloading official position archive…':kind==='car'?'Decoding car telemetry…':'Decoding track position…';output.innerHTML=`<div class="loader">${label}${total>1?` ${Math.min(100,Math.round(n/total*100))}%`:''}</div>`;};
+        const [A,B]=await fetchOfficialArchiveComparison(r,s,[{driver:na,lap:lpa},{driver:nb,lap:lpb}],progress);
+        if(!A.length||!B.length){const e=new Error('archive-telemetry-empty');e.code='archive-telemetry-empty';throw e;}
         const nameA=(dmap[String(na)]?.name_acronym||na),nameB=(dmap[String(nb)]?.name_acronym||nb),names=[nameA,nameB],rpmMax=Math.max(10000,...A.map(x=>x.rpm),...B.map(x=>x.rpm));
         output.innerHTML=`<div class="spacer"></div><div class="grid two">${telemetrySummary(A,lpa,nameA)}${telemetrySummary(B,lpb,nameB)}</div><div class="spacer"></div>${sectorComparison(lpa,lpb,names)}<div class="spacer"></div>${titleBlock('TIME GAIN MAP','Who is faster where')}<div class="card speed-map-card delta-map-card">${trackDeltaMapSvg(A,B,names,lpa,lpb)}</div><div class="spacer"></div>${telemetryLineChart('SPEED',A,B,x=>x.speed,'km/h',0,Math.max(360,...A.map(x=>x.speed),...B.map(x=>x.speed)),names)}<div class="spacer"></div>${deltaChart(A,B,names)}<div class="spacer"></div>${telemetryLineChart('THROTTLE',A,B,x=>x.throttle,'%',0,100,names)}<div class="spacer"></div>${telemetryLineChart('BRAKE',A,B,x=>x.brake,'0 / 100',0,100,names)}<div class="spacer"></div>${telemetryLineChart('GEAR',A,B,x=>x.gear,'gear',0,8,names)}<div class="spacer"></div>${telemetryLineChart('RPM',A,B,x=>x.rpm,'rpm',0,rpmMax,names)}`;
       }catch(e){
-        const status=Number(e?.status||e?.message);let msg='No usable car telemetry was returned for one of these laps. Try another completed lap. If several laps fail, OpenF1 has not published the car-data stream for this session yet.';
-        if(openF1LiveWindow(os))msg='This session is still inside OpenF1’s live-data window. Free telemetry becomes available about 30 minutes after the session ends.';
-        else if(status===429)msg='OpenF1 rate-limited the telemetry request. Wait a few seconds and tap Load Comparison again.';
+        let msg='The official Formula 1 archive did not return usable telemetry for one of these laps.';
+        if(e?.code==='archive-not-ready'||e?.status===404)msg='Formula 1 is still finalising the official post-session archive. It normally appears shortly after the session is archived; wait a few minutes and tap Load Comparison again.';
+        else if(e?.message==='browser-decompression')msg='This browser cannot decode Formula 1’s compressed telemetry archive. Update Chrome/Samsung Internet and try again.';
+        else if(e?.code==='archive-fetch')msg='The official Formula 1 archive could not be reached just now. Try Load Comparison again in a moment.';
+        else if(e?.code==='archive-telemetry-empty')msg='The official archive is present, but this selected lap did not contain enough car telemetry. Try another completed lap.';
         output.innerHTML=`<div class="error-box">${esc(msg)}</div>`;
       }
       finally{load.disabled=false;}
     };
     load.onclick=run;output.innerHTML='<div class="card"><div class="empty">Choose two laps and tap Load Comparison.</div></div>';
   }catch{
-    root.innerHTML='<div class="card"><div class="empty">Post-session telemetry is not available for this session yet. OpenF1 free historical telemetry covers sessions from 2023 onwards after publication.</div></div>';
+    root.innerHTML='<div class="card"><div class="empty">Post-session telemetry is not available yet. F1 Hub now uses Formula 1’s official session archive and will work once that session has been archived.</div></div>';
   }
 }
 

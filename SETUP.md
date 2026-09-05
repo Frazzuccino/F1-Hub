@@ -1,19 +1,17 @@
-# F1 Hub v1.9.1 — update / install
+# F1 Hub v1.10.1 — update / install
 
-## Update GitHub Pages
-1. Replace the files in your existing F1 Hub GitHub Pages repository with everything in this folder.
-2. Keep `index.html`, `app.js`, `styles.css`, `manifest.json`, `service-worker.js`, the icons and `.nojekyll` at the repository root.
-3. Commit the change and wait for GitHub Pages to redeploy.
+Replace the files in your existing GitHub Pages repository with the files in this folder, then commit the changes.
 
-## Force the latest version once
-Open your F1 Hub URL with `?v=180` on the end. In **More**, the footer should say **F1 Hub v1.9.1**.
+Open your F1 Hub URL once with `?v=1101` on the end. In **More**, the footer should say **F1 Hub v1.10.1**.
 
-## New in v1.9.1
-- Car Development now shows only race weekends that have started; future rounds are hidden.
-- The Car Updates tab has been removed from individual race hubs. Car Development remains under More.
-- Telemetry now includes one combined circuit time-gain map. Red sections mean Driver A is gaining time; blue sections mean Driver B is gaining time.
-- The previous pair of speed-coloured circuit maps has been replaced by this driver-v-driver comparison map.
-- Race Weather now includes condition, feels-like temperature, rain chance, wind/gusts, precipitation amount and a five-hour strip centred on race start, with direct radar access.
+## New in v1.10.1
 
-## Telemetry note
-The time-gain map compares local changes in cumulative lap delta around the circuit. It is intended to show where each selected lap gains or loses time; OpenF1 position data remains approximate.
+- Live timing now uses an automatic free-source fallback chain.
+- First it tries the existing community JSON relay.
+- If that fails, it tries a Formula-Timing snapshot.
+- If that fails, it tries an F1 Live Data snapshot.
+- The latest valid timing table stays on screen as `STALE` while F1 Hub retries.
+- Direct buttons to F1 Live Data, Formula-Timing and official F1 timing remain available as final fallbacks.
+- Post-session telemetry continues to use the official Formula 1 archive introduced in v1.10.0.
+
+Because F1 Hub is a static GitHub Pages app, third-party sites may change their markup, CORS policy or availability. The live fallback chain is designed to fail gracefully rather than leave a blank page.

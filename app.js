@@ -4,6 +4,7 @@ const YEAR = new Date().getFullYear();
 const UK_TZ = 'Europe/London';
 const JOLPICA = 'https://api.jolpi.ca/ergast/f1';
 const OPENF1 = 'https://api.openf1.org/v1';
+const LIVE_TIMING_API = 'https://f1-live-api.onrender.com';
 const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
 const NEWS_SOURCES = [
   {id:'BBC',name:'BBC Sport',feed:'https://feeds.bbci.co.uk/sport/formula1/rss.xml'},
@@ -17,7 +18,7 @@ const PENALTY_SOURCE = 'https://racingnews365.com/penalty-points-f1-drivers';
 const REPRIMAND_SOURCE = 'https://timepenalty.com/guide/reprimand';
 const JINA = 'https://r.jina.ai/';
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.9.0';
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -82,7 +83,7 @@ const FALLBACK_REPRIMANDS = {'Gabriel Bortoleto':1,'Oliver Bearman':1,'Alex Albo
 const state = {
   route:'home', schedule:[], drivers:[], constructors:[], photos:{}, wikiPhotos:{}, news:[], newsSource:'ALL', spoilerNewsRevealedRound:null, standingsSpoilerRevealedRound:null,
   penaltyPoints:{...FALLBACK_POINTS}, reprimands:{...FALLBACK_REPRIMANDS}, stewardDocs:{}, historyYear:YEAR-1, historyCache:{}, carUpdateDocs:{},
-  loaded:false, refreshing:false, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null
+  loaded:false, refreshing:false, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null, liveTimer:null
 };
 const view = document.getElementById('view');
 
@@ -161,14 +162,16 @@ function toggleSpoilerMode(){
   if(!r){toast('Spoiler Mode only runs during the current race weekend');return;}
   const turnOn=!spoilerActive();
   try{localStorage.setItem(spoilerPrefKey(r),turnOn?'on':'off');}catch{}
-  if(turnOn){state.spoilerNewsRevealedRound=null;state.standingsSpoilerRevealedRound=null;}
+  if(turnOn){state.spoilerNewsRevealedRound=null;state.standingsSpoilerRevealedRound=null;try{localStorage.setItem(headlineRevealKey(r),'off');}catch{}}
   render();toast(`Spoiler Mode ${turnOn?'on':'off'}`);
 }
-function revealNewsSpoilers(){const sr=spoilerRace();state.spoilerNewsRevealedRound=sr?String(sr.round):null;renderNews();}
+function headlineRevealKey(r){return `f1hub:headline-reveal-${YEAR}-${r?.round||'none'}`;}
+function newsSpoilersRevealed(){const sr=spoilerRace();if(!sr)return false;try{return localStorage.getItem(headlineRevealKey(sr))==='on';}catch{return false;}}
+function toggleNewsSpoilers(){const sr=spoilerRace();if(!sr)return;const on=!newsSpoilersRevealed();try{localStorage.setItem(headlineRevealKey(sr),on?'on':'off');}catch{} if(state.route==='news')renderNews();else render();toast(`Headlines ${on?'revealed':'hidden'}`);}
+function headlineToggleHtml(){const on=newsSpoilersRevealed();return `<button class="spoiler-toggle ${on?'on':'off'}" onclick="toggleNewsSpoilers()" aria-pressed="${on?'true':'false'}" aria-label="${on?'Hide':'Reveal'} headlines"><span class="switch-track"><i></i></span><b>${on?'ON':'OFF'}</b></button>`;}
 function revealStandingsSpoilers(){const sr=spoilerRace();state.standingsSpoilerRevealedRound=sr?String(sr.round):null;renderStandings();}
-function newsSpoilersRevealed(){const sr=spoilerRace();return !!sr&&state.spoilerNewsRevealedRound===String(sr.round);}
 function standingsSpoilersRevealed(){const sr=spoilerRace();return !!sr&&state.standingsSpoilerRevealedRound===String(sr.round);}
-window.toggleSpoilerMode=toggleSpoilerMode;window.revealNewsSpoilers=revealNewsSpoilers;window.revealStandingsSpoilers=revealStandingsSpoilers;
+window.toggleSpoilerMode=toggleSpoilerMode;window.toggleNewsSpoilers=toggleNewsSpoilers;window.revealStandingsSpoilers=revealStandingsSpoilers;
 
 function circuitSvg(id){ const c=CIRCUITS[id]; if(!c)return null; if(c.f1db)return `https://raw.githubusercontent.com/f1db/f1db/main/src/assets/circuits/white/${c.f1db}`; return c.slug?`https://raw.githubusercontent.com/MasterPlay007/F1-Track-Layouts-SVG/main/${c.slug}.svg`:null; }
 function radarUrl(r){ const l=r.Circuit.Location; return `https://www.windy.com/-Weather-radar-radar?radar,${Number(l.lat).toFixed(4)},${Number(l.long).toFixed(4)},9`; }
@@ -270,7 +273,7 @@ function parseReprimands(text){
 function parentNav(route){ if(route==='home'||route==='races'||route==='standings'||route==='news'||route==='more')return route; if(route.startsWith('race:')||route.startsWith('session:')||route.startsWith('telemetry:')||route.startsWith('carupdates:')||route.startsWith('circuit:')||route.startsWith('radar:'))return 'races'; return 'more'; }
 function setRoute(route,push=true){ if(!route)return; state.route=route; if(push && location.hash!==`#${encodeURIComponent(route)}`)history.pushState({route},'',`#${encodeURIComponent(route)}`); window.scrollTo({top:0,behavior:'instant'}); const parent=parentNav(route);document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',parent===b.dataset.route)); render(); }
 function render(){
-  clearInterval(state.countdownTimer);clearInterval(state.radarTimer);state.radarTimer=null;
+  clearInterval(state.countdownTimer);clearInterval(state.radarTimer);clearInterval(state.liveTimer);state.radarTimer=null;state.liveTimer=null;
   view.classList.remove('view-enter');
   void view.offsetWidth;
   view.classList.add('view-enter');
@@ -303,9 +306,9 @@ function sessionRows(r){
   const ns=nextSession(r);
   return sessions(r).map(s=>{
     const done=sessionIsDone(s),live=sessionIsLive(s),next=!live&&!done&&ns?.iso===s.iso;
-    const cls=['session-row',next?'next':'',done?'done clickable':'',live?'live':''].filter(Boolean).join(' ');
-    const action=done?` onclick="setRoute('session:${r.round}:${s.key}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setRoute('session:${r.round}:${s.key}')}"`:'';
-    const stateLabel=done?(isSpoilerRace(r)?'VIEW RESULTS ›':'RESULT ›'):live?'LIVE':next?'NEXT':'';
+    const cls=['session-row',next?'next':'',done?'done clickable':'',live?'live clickable':''].filter(Boolean).join(' ');
+    const action=(done||live)?` onclick="setRoute('session:${r.round}:${s.key}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setRoute('session:${r.round}:${s.key}')}"`:'';
+    const stateLabel=done?(isSpoilerRace(r)?'VIEW RESULTS ›':'RESULT ›'):live?'LIVE TIMES ›':next?'NEXT':'';
     return `<div class="${cls}"${action}><div><div class="session-name">${esc(s.name)}</div><div class="day">${fmtDate(s.iso,{weekday:'short',day:'numeric',month:'short'})}</div></div><div class="clock">${fmtTime(s.iso)}</div><div class="state">${stateLabel}</div></div>`;
   }).join('');
 }
@@ -382,7 +385,7 @@ function renderNews(){
   if(!sourceIds.includes(state.newsSource))state.newsSource='ALL';
   const filtered=state.newsSource==='ALL'?state.news:state.news.filter(n=>n.sourceId===state.newsSource);
   const tabs=`<div class="news-source-tabs">${sourceIds.map(id=>{const x=NEWS_SOURCES.find(s=>s.id===id);return `<button class="tab ${state.newsSource===id?'active':''}" data-news-source="${id}">${id==='ALL'?'ALL':esc(x?.name||id)}</button>`;}).join('')}</div>`;
-  const reveal=guard?`<div class="card spoiler-guard"><div class="eyebrow">SPOILER MODE</div><div class="card-title">Headlines are hidden during the current race weekend</div><div class="muted">Article sources and times remain visible. Spoiler Mode switches off automatically the day after the race.</div><div class="spacer"></div><button class="external-btn red" onclick="revealNewsSpoilers()">REVEAL HEADLINES</button></div><div class="spacer"></div>`:'';
+  const reveal=spoilerActive()?`<div class="card spoiler-settings"><div><div class="eyebrow">SPOILER MODE</div><div class="card-title">Reveal headlines</div><div class="muted">Turn this on if you want headlines visible during this race weekend. You can switch them off again at any time.</div></div>${headlineToggleHtml()}</div><div class="spacer"></div>`:'';
   const cards=filtered.length?filtered.map(n=>guard?`<div class="card news-card spoiler-news-card"><div class="news-body"><div class="news-title">SPOILER HIDDEN</div><div class="news-meta">${esc((n.source||'F1').toUpperCase())} · ${fmtNewsTime(n.pubDate)}</div></div></div>`:`<a class="card news-card news-link" href="${esc(n.link)}" target="_blank" rel="noopener">${n.thumbnail?`<img class="news-img" src="${esc(n.thumbnail)}" alt="" loading="lazy">`:''}<div class="news-body"><div class="news-title">${esc(n.title)}</div><div class="news-meta">${esc((n.source||'F1').toUpperCase())} · ${fmtNewsTime(n.pubDate)}</div></div></a>`).join(''):'<div class="empty">No stories from this source right now.</div>';
   view.innerHTML=titleBlock('MULTI-SOURCE','Latest News',spoilerPill())+tabs+reveal+`<div class="grid news-grid">${cards}</div>`;
   document.querySelectorAll('[data-news-source]').forEach(b=>b.onclick=()=>{state.newsSource=b.dataset.newsSource;renderNews();});
@@ -593,9 +596,41 @@ function raceStrategyHtml(stints,drivers,results){
   const nums=[...new Set([...order,...Object.keys(by)])];
   return `<div class="card strategy-card"><div class="eyebrow">TYRE STRATEGY</div><div class="strategy-list">${nums.filter(n=>by[n]?.length).map(n=>{const d=dmap[n]||{},ss=by[n].slice().sort((a,b)=>Number(a.stint_number)-Number(b.stint_number));return `<div class="strategy-row"><div class="strategy-driver">${esc(d.name_acronym||n)}</div><div class="strategy-stints">${ss.map(x=>`<span class="tyre ${tyreClass(x.compound)}"><i>${esc((x.compound||'?').slice(0,1))}</i>${esc(x.lap_start??'?')}–${esc(x.lap_end??'?')}</span>`).join('<span class="strategy-arrow">→</span>')}</div><div class="strategy-stops">${Math.max(0,ss.length-1)} stop${ss.length===2?'':'s'}</div></div>`;}).join('')}</div></div>`;
 }
+
+async function fetchLiveJSON(url,timeoutMs=12000){
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),timeoutMs);
+  try{const r=await fetch(url,{signal:c.signal,cache:'no-store'});if(!r.ok){const e=new Error(String(r.status));e.status=r.status;throw e;}return await r.json();}
+  finally{clearTimeout(t);}
+}
+function liveTimingRows(payload){
+  const rows=Array.isArray(payload)?payload:(payload?.drivers||payload?.timing||payload?.data||[]);
+  return (rows||[]).filter(Boolean).slice().sort((a,b)=>Number(a.position??a.Position??99)-Number(b.position??b.Position??99));
+}
+function liveField(x,...keys){for(const k of keys){if(x?.[k]!==undefined&&x?.[k]!==null&&x?.[k]!=='' )return x[k];}return null;}
+function liveTimingTable(rows){
+  if(!rows.length)return '<div class="card"><div class="empty">Live timing has not started publishing yet.</div></div>';
+  return `<div class="card classification-card"><div class="classification-head"><span>POS</span><span>DRIVER</span><span>GAP / BEST</span></div><div class="classification-list">${rows.map(x=>{
+    const pos=liveField(x,'position','Position')??'—',code=liveField(x,'acronym','name_acronym','Tla','RacingNumber')||liveField(x,'driver_number','DriverNumber')||'—';
+    const name=liveField(x,'name','full_name','FullName','BroadcastName')||code,team=liveField(x,'team','team_name','TeamName')||'';
+    const gap=liveField(x,'gap_to_leader','GapToLeader','gap','Gap')??'',best=liveField(x,'best_lap_time','BestLapTime','bestLapTime')??'',last=liveField(x,'last_lap_time','LastLapTime','lastLapTime')??'';
+    const compound=liveField(x,'tyre_compound','Compound','compound')||'',tyreLaps=liveField(x,'tyre_laps','TyreLaps','tyre_life')??'';
+    const right=(String(pos)==='1'?(best||last||'LEADER'):(gap||best||last||'—'));
+    const tyre=compound?` · ${String(compound).toUpperCase()}${tyreLaps!==''?` ${tyreLaps}L`:''}`:'';
+    const col=liveField(x,'team_colour','team_color','TeamColour');
+    return `<div class="classification-row ${String(pos)==='1'?'winner':''}"><div class="class-pos">${esc(pos)}</div><div class="driver-line"><i class="team-dot" style="background:${col?'#'+String(col).replace('#',''):teamColour(team)}"></i><div><div class="driver-name">${esc(code)} · ${esc(name)}</div><div class="driver-meta">${esc(team)}${esc(tyre)}</div></div></div><div class="class-time">${esc(right)}${last&&last!==right?`<small class="class-gap">LAST ${esc(last)}</small>`:''}</div></div>`;
+  }).join('')}</div></div>`;
+}
+function renderLiveSession(r,s){
+  view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('race:${r.round}')">← WEEKEND</button></div><div class="spacer"></div>${titleBlock(`${flag(r.Circuit.Location.country)} ${r.raceName}`,`${s.name} · LIVE`)}<div class="card live-session-banner"><div><div class="eyebrow">LIVE TIMING</div><div class="card-title">Updating automatically</div><div class="muted">Positions, gaps and best laps refresh about every 5 seconds.</div></div><span class="pill live">LIVE</span></div><div class="spacer"></div><div id="live-session-root"><div class="loader">Connecting to live timing…</div></div><div class="source-note">Live timing uses an unofficial community relay of Formula 1's public timing stream. If the relay is unavailable, the page will retry automatically. OpenF1 real-time access itself requires authentication.</div>`;
+  const root=document.getElementById('live-session-root');let busy=false;
+  const load=async()=>{if(busy||state.route!==`session:${r.round}:${s.key}`)return;busy=true;try{const j=await fetchLiveJSON(`${LIVE_TIMING_API}/timing`);const rows=liveTimingRows(j);root.innerHTML=liveTimingTable(rows)+`<div class="source-note compact">Updated ${new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:UK_TZ}).format(new Date())}</div>`;}catch(e){root.innerHTML='<div class="card"><div class="empty">Live timing is temporarily unavailable from the free relay. F1 Hub will keep retrying while this page is open.</div></div>';}finally{busy=false;}};
+  load();state.liveTimer=setInterval(load,5000);
+}
+
 async function renderSessionResult(round,key){
   const r=state.schedule.find(x=>String(x.round)===String(round));if(!r)return setRoute('races');
   const s=sessions(r).find(x=>x.key===key);if(!s)return setRoute(`race:${round}`);
+  if(sessionIsLive(s))return renderLiveSession(r,s);
   view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('race:${r.round}')">← WEEKEND</button></div><div class="spacer"></div>${titleBlock(`${flag(r.Circuit.Location.country)} ${r.raceName}`,s.name)}<div id="session-classification"><div class="loader">Loading classification…</div></div>`;
   const root=document.getElementById('session-classification');
   try{
@@ -746,13 +781,14 @@ function rangeUrl(endpoint,sessionKey,driverNumber,start,end){
 }
 let telemetryQueue=Promise.resolve(),telemetryLastRequest=0;
 function telemetryFetchJSON(url,key,maxAge=7*864e5,timeoutMs=28000){
-  const fresh=cacheGet(key,maxAge);if(fresh)return Promise.resolve(fresh);
+  const fresh=cacheGet(key,maxAge);if(fresh&&(!Array.isArray(fresh)||fresh.length))return Promise.resolve(fresh);
+  if(Array.isArray(fresh)&&!fresh.length){try{localStorage.removeItem('f1hub:'+key);}catch{}}
   const run=async()=>{
     const gap=Math.max(0,410-(Date.now()-telemetryLastRequest));if(gap)await sleep(gap);
     telemetryLastRequest=Date.now();
     let lastErr;
     for(let attempt=0;attempt<3;attempt++){
-      try{return await fetchJSON(url,key,maxAge,timeoutMs);}
+      try{const data=await fetchJSON(url,key,maxAge,timeoutMs);if(Array.isArray(data)&&!data.length){try{localStorage.removeItem('f1hub:'+key);}catch{}}return data;}
       catch(e){lastErr=e;const status=Number(e?.status||e?.message);if(status!==429)throw e;await sleep(1100*(attempt+1));telemetryLastRequest=Date.now();}
     }
     throw lastErr||new Error('telemetry request failed');
@@ -792,7 +828,7 @@ function telemetryWindow(lap){
 }
 function sliceTelemetryRows(rows,startMs,endMs){return (rows||[]).filter(x=>{const t=new Date(x.date).getTime();return Number.isFinite(t)&&t>=startMs&&t<=endMs;});}
 async function fetchLapTelemetry(sessionKey,driverNumber,lap){
-  const w=telemetryWindow(lap),s=new Date(w.queryStart).toISOString(),e=new Date(w.queryEnd).toISOString(),key=`telemetry-${sessionKey}-${driverNumber}-${lap.lap_number}-v2`;
+  const w=telemetryWindow(lap),s=new Date(w.queryStart).toISOString(),e=new Date(w.queryEnd).toISOString(),key=`telemetry-${sessionKey}-${driverNumber}-${lap.lap_number}-v3`;
   let car=[],loc=[];
   try{car=await telemetryFetchJSON(rangeUrl('car_data',sessionKey,driverNumber,s,e),`${key}-car`,7*864e5);}catch(e){if(Number(e?.status||e?.message)===401||Number(e?.status||e?.message)===403)throw e;}
   try{loc=await telemetryFetchJSON(rangeUrl('location',sessionKey,driverNumber,s,e),`${key}-loc`,7*864e5);}catch{}
@@ -800,12 +836,12 @@ async function fetchLapTelemetry(sessionKey,driverNumber,lap){
   // If the ranged lookup comes back empty, fetch that driver's session once and
   // slice it locally instead of failing the comparison.
   if(car.length<8){
-    const full=await telemetryFetchJSON(`${OPENF1}/car_data?session_key=${encodeURIComponent(sessionKey)}&driver_number=${encodeURIComponent(driverNumber)}`,`telemetry-full-car-${sessionKey}-${driverNumber}`,7*864e5,35000);
+    const full=await telemetryFetchJSON(`${OPENF1}/car_data?session_key=${encodeURIComponent(sessionKey)}&driver_number=${encodeURIComponent(driverNumber)}`,`telemetry-full-car-${sessionKey}-${driverNumber}-v3`,7*864e5,35000);
     car=sliceTelemetryRows(full,w.queryStart,w.queryEnd);
   }
   if(loc.length<5){
     try{
-      const fullLoc=await telemetryFetchJSON(`${OPENF1}/location?session_key=${encodeURIComponent(sessionKey)}&driver_number=${encodeURIComponent(driverNumber)}`,`telemetry-full-loc-${sessionKey}-${driverNumber}`,7*864e5,35000);
+      const fullLoc=await telemetryFetchJSON(`${OPENF1}/location?session_key=${encodeURIComponent(sessionKey)}&driver_number=${encodeURIComponent(driverNumber)}`,`telemetry-full-loc-${sessionKey}-${driverNumber}-v3`,7*864e5,35000);
       loc=sliceTelemetryRows(fullLoc,w.queryStart,w.queryEnd);
     }catch{loc=[];}
   }
@@ -929,7 +965,7 @@ async function renderTelemetry(round,key){
         const nameA=(dmap[String(na)]?.name_acronym||na),nameB=(dmap[String(nb)]?.name_acronym||nb),names=[nameA,nameB],rpmMax=Math.max(10000,...A.map(x=>x.rpm),...B.map(x=>x.rpm));
         output.innerHTML=`<div class="spacer"></div><div class="grid two">${telemetrySummary(A,lpa,nameA)}${telemetrySummary(B,lpb,nameB)}</div><div class="spacer"></div>${sectorComparison(lpa,lpb,names)}<div class="spacer"></div>${titleBlock('TIME GAIN MAP','Who is faster where')}<div class="card speed-map-card delta-map-card">${trackDeltaMapSvg(A,B,names,lpa,lpb)}</div><div class="spacer"></div>${telemetryLineChart('SPEED',A,B,x=>x.speed,'km/h',0,Math.max(360,...A.map(x=>x.speed),...B.map(x=>x.speed)),names)}<div class="spacer"></div>${deltaChart(A,B,names)}<div class="spacer"></div>${telemetryLineChart('THROTTLE',A,B,x=>x.throttle,'%',0,100,names)}<div class="spacer"></div>${telemetryLineChart('BRAKE',A,B,x=>x.brake,'0 / 100',0,100,names)}<div class="spacer"></div>${telemetryLineChart('GEAR',A,B,x=>x.gear,'gear',0,8,names)}<div class="spacer"></div>${telemetryLineChart('RPM',A,B,x=>x.rpm,'rpm',0,rpmMax,names)}`;
       }catch(e){
-        const status=Number(e?.status||e?.message);let msg='OpenF1 returned no usable car telemetry for one of these laps. Try Reload Comparison or choose another completed lap.';
+        const status=Number(e?.status||e?.message);let msg='OpenF1 returned no usable car telemetry for one of these laps. F1 Hub now ignores stale empty telemetry caches, so tap Load Comparison once more; if it still fails, try another completed lap.';
         if(openF1LiveWindow(os))msg='This session is still inside OpenF1’s live-data window. Free telemetry becomes available about 30 minutes after the session ends.';
         else if(status===429)msg='OpenF1 rate-limited the telemetry request. Wait a few seconds and tap Load Comparison again.';
         output.innerHTML=`<div class="error-box">${esc(msg)}</div>`;

@@ -1,4 +1,4 @@
-# F1 Hub v1.8.0 — update / install
+# F1 Hub v1.9.0 — update / install
 
 ## Update GitHub Pages
 1. Replace the files in your existing F1 Hub GitHub Pages repository with everything in this folder.
@@ -6,9 +6,9 @@
 3. Commit the change and wait for GitHub Pages to redeploy.
 
 ## Force the latest version once
-Open your F1 Hub URL with `?v=180` on the end. In **More**, the footer should say **F1 Hub v1.8.0**.
+Open your F1 Hub URL with `?v=180` on the end. In **More**, the footer should say **F1 Hub v1.9.0**.
 
-## New in v1.8.0
+## New in v1.9.0
 - Car Development now shows only race weekends that have started; future rounds are hidden.
 - The Car Updates tab has been removed from individual race hubs. Car Development remains under More.
 - Telemetry now includes one combined circuit time-gain map. Red sections mean Driver A is gaining time; blue sections mean Driver B is gaining time.

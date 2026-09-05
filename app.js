@@ -18,7 +18,7 @@ const PENALTY_SOURCE = 'https://racingnews365.com/penalty-points-f1-drivers';
 const REPRIMAND_SOURCE = 'https://timepenalty.com/guide/reprimand';
 const JINA = 'https://r.jina.ai/';
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.9.1';
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -597,7 +597,7 @@ function raceStrategyHtml(stints,drivers,results){
   return `<div class="card strategy-card"><div class="eyebrow">TYRE STRATEGY</div><div class="strategy-list">${nums.filter(n=>by[n]?.length).map(n=>{const d=dmap[n]||{},ss=by[n].slice().sort((a,b)=>Number(a.stint_number)-Number(b.stint_number));return `<div class="strategy-row"><div class="strategy-driver">${esc(d.name_acronym||n)}</div><div class="strategy-stints">${ss.map(x=>`<span class="tyre ${tyreClass(x.compound)}"><i>${esc((x.compound||'?').slice(0,1))}</i>${esc(x.lap_start??'?')}–${esc(x.lap_end??'?')}</span>`).join('<span class="strategy-arrow">→</span>')}</div><div class="strategy-stops">${Math.max(0,ss.length-1)} stop${ss.length===2?'':'s'}</div></div>`;}).join('')}</div></div>`;
 }
 
-async function fetchLiveJSON(url,timeoutMs=12000){
+async function fetchLiveJSON(url,timeoutMs=18000){
   const c=new AbortController(),t=setTimeout(()=>c.abort(),timeoutMs);
   try{const r=await fetch(url,{signal:c.signal,cache:'no-store'});if(!r.ok){const e=new Error(String(r.status));e.status=r.status;throw e;}return await r.json();}
   finally{clearTimeout(t);}
@@ -621,10 +621,25 @@ function liveTimingTable(rows){
   }).join('')}</div></div>`;
 }
 function renderLiveSession(r,s){
-  view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('race:${r.round}')">← WEEKEND</button></div><div class="spacer"></div>${titleBlock(`${flag(r.Circuit.Location.country)} ${r.raceName}`,`${s.name} · LIVE`)}<div class="card live-session-banner"><div><div class="eyebrow">LIVE TIMING</div><div class="card-title">Updating automatically</div><div class="muted">Positions, gaps and best laps refresh about every 5 seconds.</div></div><span class="pill live">LIVE</span></div><div class="spacer"></div><div id="live-session-root"><div class="loader">Connecting to live timing…</div></div><div class="source-note">Live timing uses an unofficial community relay of Formula 1's public timing stream. If the relay is unavailable, the page will retry automatically. OpenF1 real-time access itself requires authentication.</div>`;
-  const root=document.getElementById('live-session-root');let busy=false;
-  const load=async()=>{if(busy||state.route!==`session:${r.round}:${s.key}`)return;busy=true;try{const j=await fetchLiveJSON(`${LIVE_TIMING_API}/timing`);const rows=liveTimingRows(j);root.innerHTML=liveTimingTable(rows)+`<div class="source-note compact">Updated ${new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:UK_TZ}).format(new Date())}</div>`;}catch(e){root.innerHTML='<div class="card"><div class="empty">Live timing is temporarily unavailable from the free relay. F1 Hub will keep retrying while this page is open.</div></div>';}finally{busy=false;}};
-  load();state.liveTimer=setInterval(load,5000);
+  view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('race:${r.round}')">← WEEKEND</button></div><div class="spacer"></div>${titleBlock(`${flag(r.Circuit.Location.country)} ${r.raceName}`,`${s.name} · LIVE`)}<div class="card live-session-banner"><div><div class="eyebrow">LIVE TIMING</div><div class="card-title">Updating automatically</div><div class="muted">The free relay can take up to a minute to wake on the first connection.</div></div><span class="pill live">LIVE</span></div><div class="spacer"></div><div id="live-session-root"><div class="loader">Waking live timing feed…</div></div><div class="source-note">Live timing uses an unofficial community relay of Formula 1's public timing stream. It is not guaranteed to be available. Reliable live timing would require a paid OpenF1 live subscription or a small always-on backend.</div>`;
+  const root=document.getElementById('live-session-root');let busy=false,first=true,failures=0;
+  const retryButton=()=>{const b=document.getElementById('live-retry');if(b)b.onclick=()=>load(true);};
+  const load=async(manual=false)=>{
+    if(busy||state.route!==`session:${r.round}:${s.key}`)return;busy=true;
+    if(manual)root.innerHTML='<div class="loader">Retrying live timing…</div>';
+    try{
+      const timeout=first?65000:22000;
+      if(first){try{await fetchLiveJSON(`${LIVE_TIMING_API}/status`,timeout);}catch{}}
+      const j=await fetchLiveJSON(`${LIVE_TIMING_API}/timing`,timeout);
+      const rows=liveTimingRows(j);if(!rows.length)throw new Error('empty-live');
+      failures=0;
+      root.innerHTML=liveTimingTable(rows)+`<div class="source-note compact">Updated ${new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:UK_TZ}).format(new Date())}</div>`;
+    }catch(e){
+      failures++;
+      root.innerHTML=`<div class="card"><div class="empty">The free live-timing relay is not responding right now. F1 Hub will keep trying, but this source can occasionally be unavailable during a session.</div><div class="spacer"></div><button id="live-retry" class="external-btn red">RETRY NOW</button></div>`;retryButton();
+    }finally{first=false;busy=false;}
+  };
+  load();state.liveTimer=setInterval(load,8000);
 }
 
 async function renderSessionResult(round,key){
@@ -776,20 +791,34 @@ function lapSelectOptions(laps,driverNumber,selected){
 function rangeUrl(endpoint,sessionKey,driverNumber,start,end){
   const u=new URL(`${OPENF1}/${endpoint}`);
   u.searchParams.set('session_key',sessionKey);u.searchParams.set('driver_number',driverNumber);
-  u.searchParams.set('date>=',start);u.searchParams.set('date<=',end);
+  // OpenF1's own examples use date> / date< for telemetry windows.
+  u.searchParams.set('date>',start);u.searchParams.set('date<',end);
   return u.toString();
 }
 let telemetryQueue=Promise.resolve(),telemetryLastRequest=0;
-function telemetryFetchJSON(url,key,maxAge=7*864e5,timeoutMs=28000){
+function telemetryFetchJSON(url,key,maxAge=7*864e5,timeoutMs=35000){
   const fresh=cacheGet(key,maxAge);if(fresh&&(!Array.isArray(fresh)||fresh.length))return Promise.resolve(fresh);
   if(Array.isArray(fresh)&&!fresh.length){try{localStorage.removeItem('f1hub:'+key);}catch{}}
   const run=async()=>{
-    const gap=Math.max(0,410-(Date.now()-telemetryLastRequest));if(gap)await sleep(gap);
+    // Stay comfortably below OpenF1's 3 req/s free-tier limit.
+    const gap=Math.max(0,650-(Date.now()-telemetryLastRequest));if(gap)await sleep(gap);
     telemetryLastRequest=Date.now();
     let lastErr;
-    for(let attempt=0;attempt<3;attempt++){
-      try{const data=await fetchJSON(url,key,maxAge,timeoutMs);if(Array.isArray(data)&&!data.length){try{localStorage.removeItem('f1hub:'+key);}catch{}}return data;}
-      catch(e){lastErr=e;const status=Number(e?.status||e?.message);if(status!==429)throw e;await sleep(1100*(attempt+1));telemetryLastRequest=Date.now();}
+    for(let attempt=0;attempt<4;attempt++){
+      const c=new AbortController(),timer=setTimeout(()=>c.abort(),timeoutMs);
+      try{
+        const r=await fetch(url,{signal:c.signal,cache:'no-store'});clearTimeout(timer);
+        if(!r.ok){const e=new Error(String(r.status));e.status=r.status;if(r.status===429)e.retryAfter=Number(r.headers.get('Retry-After')||0);throw e;}
+        const data=await r.json();
+        // Never cache an empty telemetry response: new post-session data can appear later.
+        if(!Array.isArray(data)||data.length)cachePut(key,data);
+        return data;
+      }catch(e){
+        clearTimeout(timer);lastErr=e;const status=Number(e?.status||e?.message);
+        if(status!==429)throw e;
+        const wait=e?.retryAfter?Math.max(1000,e.retryAfter*1000):Math.min(15000,2500*(attempt+1));
+        await sleep(wait);telemetryLastRequest=Date.now();
+      }
     }
     throw lastErr||new Error('telemetry request failed');
   };
@@ -824,32 +853,48 @@ function buildTelemetrySeries(car,loc,startMs){
 function telemetryWindow(lap){
   const exactStart=new Date(lap.date_start).getTime();if(!Number.isFinite(exactStart))throw new Error('lap start missing');
   const duration=Math.max(20,Number(lap.lap_duration)||120),exactEnd=exactStart+duration*1000;
-  return {exactStart,exactEnd,queryStart:exactStart-8000,queryEnd:exactEnd+12000};
+  // date_start is explicitly documented by OpenF1 as approximate, so ask for a generous window.
+  return {exactStart,exactEnd,duration,queryStart:exactStart-45000,queryEnd:exactEnd+45000};
 }
 function sliceTelemetryRows(rows,startMs,endMs){return (rows||[]).filter(x=>{const t=new Date(x.date).getTime();return Number.isFinite(t)&&t>=startMs&&t<=endMs;});}
+function lapRowsFromFullSession(rows,approxStart,duration){
+  const a=(rows||[]).filter(x=>Number.isFinite(new Date(x.date).getTime())).slice().sort((x,y)=>new Date(x.date)-new Date(y.date));
+  if(!a.length)return [];
+  let best=0,bestDiff=Infinity;
+  for(let i=0;i<a.length;i++){const d=Math.abs(new Date(a[i].date).getTime()-approxStart);if(d<bestDiff){best=i;bestDiff=d;}else if(d>bestDiff+5000&&i>best+20)break;}
+  if(bestDiff>120000)return [];
+  const anchor=new Date(a[best].date).getTime(),end=anchor+(duration+5)*1000;
+  const out=[];for(let i=best;i<a.length;i++){const t=new Date(a[i].date).getTime();if(t>end)break;out.push(a[i]);}
+  return out;
+}
 async function fetchLapTelemetry(sessionKey,driverNumber,lap){
-  const w=telemetryWindow(lap),s=new Date(w.queryStart).toISOString(),e=new Date(w.queryEnd).toISOString(),key=`telemetry-${sessionKey}-${driverNumber}-${lap.lap_number}-v3`;
+  const w=telemetryWindow(lap),s=new Date(w.queryStart).toISOString(),e=new Date(w.queryEnd).toISOString(),key=`telemetry-${sessionKey}-${driverNumber}-${lap.lap_number}-v4`;
   let car=[],loc=[];
   try{car=await telemetryFetchJSON(rangeUrl('car_data',sessionKey,driverNumber,s,e),`${key}-car`,7*864e5);}catch(e){if(Number(e?.status||e?.message)===401||Number(e?.status||e?.message)===403)throw e;}
   try{loc=await telemetryFetchJSON(rangeUrl('location',sessionKey,driverNumber,s,e),`${key}-loc`,7*864e5);}catch{}
-  // OpenF1 lap start times and telemetry timestamps can sit a few seconds apart.
-  // If the ranged lookup comes back empty, fetch that driver's session once and
-  // slice it locally instead of failing the comparison.
+
+  // The lap start timestamp is approximate. Align to the nearest actual telemetry sample
+  // rather than requiring the samples to fall inside a tiny timestamp window.
+  car=lapRowsFromFullSession(car,w.exactStart,w.duration);
+  loc=lapRowsFromFullSession(loc,w.exactStart,w.duration);
+
   if(car.length<8){
-    const full=await telemetryFetchJSON(`${OPENF1}/car_data?session_key=${encodeURIComponent(sessionKey)}&driver_number=${encodeURIComponent(driverNumber)}`,`telemetry-full-car-${sessionKey}-${driverNumber}-v3`,7*864e5,35000);
-    car=sliceTelemetryRows(full,w.queryStart,w.queryEnd);
+    const full=await telemetryFetchJSON(`${OPENF1}/car_data?session_key=${encodeURIComponent(sessionKey)}&driver_number=${encodeURIComponent(driverNumber)}`,`telemetry-full-car-${sessionKey}-${driverNumber}-v4`,7*864e5,50000);
+    car=lapRowsFromFullSession(full,w.exactStart,w.duration);
   }
   if(loc.length<5){
     try{
-      const fullLoc=await telemetryFetchJSON(`${OPENF1}/location?session_key=${encodeURIComponent(sessionKey)}&driver_number=${encodeURIComponent(driverNumber)}`,`telemetry-full-loc-${sessionKey}-${driverNumber}-v3`,7*864e5,35000);
-      loc=sliceTelemetryRows(fullLoc,w.queryStart,w.queryEnd);
+      const fullLoc=await telemetryFetchJSON(`${OPENF1}/location?session_key=${encodeURIComponent(sessionKey)}&driver_number=${encodeURIComponent(driverNumber)}`,`telemetry-full-loc-${sessionKey}-${driverNumber}-v4`,7*864e5,50000);
+      loc=lapRowsFromFullSession(fullLoc,w.exactStart,w.duration);
     }catch{loc=[];}
   }
-  // Query with padding for reliability, then tighten the plotted samples back
-  // around the timed lap so the distance axis is not distorted by the padding.
-  const tightStart=w.exactStart-2000,tightEnd=w.exactEnd+4000,tightCar=sliceTelemetryRows(car,tightStart,tightEnd),tightLoc=sliceTelemetryRows(loc,tightStart,tightEnd);
-  if(tightCar.length>=8)car=tightCar;if(tightLoc.length>=5)loc=tightLoc;
-  return buildTelemetrySeries(car,loc,w.exactStart);
+  if(car.length<8)return [];
+  const actualStart=new Date(car[0].date).getTime();
+  if(loc.length>=5){
+    const actualEnd=new Date(car.at(-1).date).getTime()+1500;
+    loc=sliceTelemetryRows(loc,actualStart-1500,actualEnd);
+  }
+  return buildTelemetrySeries(car,loc,actualStart);
 }
 function openF1LiveWindow(os){
   const st=new Date(os?.date_start).getTime(),en=new Date(os?.date_end||os?.date_start).getTime();
@@ -965,14 +1010,14 @@ async function renderTelemetry(round,key){
         const nameA=(dmap[String(na)]?.name_acronym||na),nameB=(dmap[String(nb)]?.name_acronym||nb),names=[nameA,nameB],rpmMax=Math.max(10000,...A.map(x=>x.rpm),...B.map(x=>x.rpm));
         output.innerHTML=`<div class="spacer"></div><div class="grid two">${telemetrySummary(A,lpa,nameA)}${telemetrySummary(B,lpb,nameB)}</div><div class="spacer"></div>${sectorComparison(lpa,lpb,names)}<div class="spacer"></div>${titleBlock('TIME GAIN MAP','Who is faster where')}<div class="card speed-map-card delta-map-card">${trackDeltaMapSvg(A,B,names,lpa,lpb)}</div><div class="spacer"></div>${telemetryLineChart('SPEED',A,B,x=>x.speed,'km/h',0,Math.max(360,...A.map(x=>x.speed),...B.map(x=>x.speed)),names)}<div class="spacer"></div>${deltaChart(A,B,names)}<div class="spacer"></div>${telemetryLineChart('THROTTLE',A,B,x=>x.throttle,'%',0,100,names)}<div class="spacer"></div>${telemetryLineChart('BRAKE',A,B,x=>x.brake,'0 / 100',0,100,names)}<div class="spacer"></div>${telemetryLineChart('GEAR',A,B,x=>x.gear,'gear',0,8,names)}<div class="spacer"></div>${telemetryLineChart('RPM',A,B,x=>x.rpm,'rpm',0,rpmMax,names)}`;
       }catch(e){
-        const status=Number(e?.status||e?.message);let msg='OpenF1 returned no usable car telemetry for one of these laps. F1 Hub now ignores stale empty telemetry caches, so tap Load Comparison once more; if it still fails, try another completed lap.';
+        const status=Number(e?.status||e?.message);let msg='No usable car telemetry was returned for one of these laps. Try another completed lap. If several laps fail, OpenF1 has not published the car-data stream for this session yet.';
         if(openF1LiveWindow(os))msg='This session is still inside OpenF1’s live-data window. Free telemetry becomes available about 30 minutes after the session ends.';
         else if(status===429)msg='OpenF1 rate-limited the telemetry request. Wait a few seconds and tap Load Comparison again.';
         output.innerHTML=`<div class="error-box">${esc(msg)}</div>`;
       }
       finally{load.disabled=false;}
     };
-    load.onclick=run;await sleep(1050);await run();
+    load.onclick=run;output.innerHTML='<div class="card"><div class="empty">Choose two laps and tap Load Comparison.</div></div>';
   }catch{
     root.innerHTML='<div class="card"><div class="empty">Post-session telemetry is not available for this session yet. OpenF1 free historical telemetry covers sessions from 2023 onwards after publication.</div></div>';
   }

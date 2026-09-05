@@ -17,7 +17,7 @@ const PENALTY_SOURCE = 'https://racingnews365.com/penalty-points-f1-drivers';
 const REPRIMAND_SOURCE = 'https://timepenalty.com/guide/reprimand';
 const JINA = 'https://r.jina.ai/';
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -334,9 +334,31 @@ function latestHeadline(){
   if(spoilerActive()&&!newsSpoilersRevealed())return `<div class="card"><div class="eyebrow">LATEST NEWS · ${esc(n.source||'F1')}</div><div class="card-title" style="margin-top:6px">Headline hidden by Spoiler Mode</div><div class="news-meta">${fmtNewsTime(n.pubDate)}</div><div class="spacer"></div><button class="external-btn" onclick="setRoute('news')">OPEN NEWS</button></div>`;
   return `<a class="card clickable news-link" href="${esc(n.link)}" target="_blank" rel="noopener"><div class="eyebrow">LATEST NEWS</div><div class="card-title" style="margin-top:6px">${esc(n.title)}</div><div class="news-meta">${esc((n.source||'F1').toUpperCase())} · ${fmtNewsTime(n.pubDate)}</div></a>`;
 }
-function weatherCard(r){return `<div id="weather-card" class="card"><div class="eyebrow">RACE WEATHER</div><div class="stat-big">—</div><div class="muted">Checking forecast…</div></div>`;}
+function weatherCard(r){return `<div id="weather-card" class="card race-weather-card"><div class="eyebrow">RACE WEATHER</div><div class="weather-loading"><div class="stat-big">—</div><div class="muted">Checking race forecast…</div></div></div>`;}
+function weatherCondition(code){
+  const c=Number(code);
+  if(c===0)return ['☀️','Clear'];if(c===1)return ['🌤️','Mostly clear'];if(c===2)return ['⛅','Partly cloudy'];if(c===3)return ['☁️','Overcast'];
+  if(c===45||c===48)return ['🌫️','Fog'];if(c>=51&&c<=57)return ['🌦️','Drizzle'];if(c>=61&&c<=67)return ['🌧️','Rain'];
+  if(c>=71&&c<=77)return ['🌨️','Snow'];if(c>=80&&c<=82)return ['🌦️','Showers'];if(c>=85&&c<=86)return ['🌨️','Snow showers'];
+  if(c>=95)return ['⛈️','Thunderstorm'];return ['🌥️','Mixed'];
+}
+function closestWeatherIndex(times,targetMs){
+  if(!times.length)return -1;let best=0,bestD=Infinity;for(let i=0;i<times.length;i++){const d=Math.abs(new Date(times[i]).getTime()-targetMs);if(d<bestD){best=i;bestD=d;}}return best;
+}
 async function loadWeatherIntoCard(r){
-  const el=document.getElementById('weather-card');if(!el)return;try{const l=r.Circuit.Location;const url=`https://api.open-meteo.com/v1/forecast?latitude=${l.lat}&longitude=${l.long}&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m&timezone=${encodeURIComponent(UK_TZ)}&forecast_days=16`;const w=await fetchJSON(url,`weather-${r.Circuit.circuitId}`,30*60e3);const target=new Date(raceIso(r));const times=w.hourly?.time||[];let i=times.reduce((best,x,j)=>Math.abs(new Date(x)-target)<Math.abs(new Date(times[best]||0)-target)?j:best,0);if(!times.length||Math.abs(new Date(times[i])-target)>20*3600e3){el.innerHTML='<div class="eyebrow">RACE WEATHER</div><div class="card-title" style="margin-top:7px">Forecast not available yet</div><div class="muted" style="margin-top:5px">Weather appears when the race is inside the forecast window.</div>';return;}const temp=Math.round(w.hourly.temperature_2m?.[i]??0),rain=w.hourly.precipitation_probability?.[i]??0,wind=Math.round(w.hourly.wind_speed_10m?.[i]??0);el.innerHTML=`<div class="eyebrow">RACE WEATHER</div><div class="stat-big">${temp}°C</div><div class="muted">Rain ${rain}% · Wind ${wind} km/h</div>`;}catch{el.innerHTML='<div class="eyebrow">RACE WEATHER</div><div class="muted" style="margin-top:7px">Forecast unavailable.</div>';}
+  const el=document.getElementById('weather-card');if(!el)return;
+  try{
+    const l=r.Circuit.Location;
+    const url=`https://api.open-meteo.com/v1/forecast?latitude=${l.lat}&longitude=${l.long}&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,wind_speed_10m,wind_gusts_10m&timezone=${encodeURIComponent(UK_TZ)}&forecast_days=16`;
+    const w=await fetchJSON(url,`weather-v2-${r.Circuit.circuitId}`,30*60e3);
+    const target=new Date(raceIso(r)),times=w.hourly?.time||[],i=closestWeatherIndex(times,target.getTime());
+    if(i<0||Math.abs(new Date(times[i]).getTime()-target.getTime())>20*3600e3){
+      el.innerHTML=`<div class="eyebrow">RACE WEATHER</div><div class="card-title" style="margin-top:7px">Forecast not available yet</div><div class="muted" style="margin-top:5px">The detailed race forecast appears when the Grand Prix enters the forecast window.</div><div class="spacer"></div><button class="external-btn" onclick="setRoute('radar:${r.round}')">OPEN RAIN RADAR</button>`;return;
+    }
+    const temp=Math.round(w.hourly.temperature_2m?.[i]??0),feel=Math.round(w.hourly.apparent_temperature?.[i]??temp),rain=Math.round(w.hourly.precipitation_probability?.[i]??0),prec=Number(w.hourly.precipitation?.[i]??0),wind=Math.round(w.hourly.wind_speed_10m?.[i]??0),gust=Math.round(w.hourly.wind_gusts_10m?.[i]??0),[icon,condition]=weatherCondition(w.hourly.weather_code?.[i]);
+    const offsets=[-2,-1,0,1,2],hourly=offsets.map(h=>{const at=target.getTime()+h*3600e3,j=closestWeatherIndex(times,at);if(j<0||Math.abs(new Date(times[j]).getTime()-at)>40*60e3)return '';const [ic]=weatherCondition(w.hourly.weather_code?.[j]);return `<div class="weather-hour ${h===0?'race-hour':''}"><b>${fmtTime(new Date(at).toISOString())}</b><span>${ic}</span><strong>${Math.round(w.hourly.temperature_2m?.[j]??0)}°</strong><small>💧 ${Math.round(w.hourly.precipitation_probability?.[j]??0)}%</small></div>`;}).join('');
+    el.innerHTML=`<div class="weather-head"><div><div class="eyebrow">RACE WEATHER · ${fmtTime(raceIso(r))}</div><div class="weather-main"><span class="weather-icon">${icon}</span><div><div class="stat-big">${temp}°C</div><div class="weather-condition">${esc(condition)}</div></div></div></div><div class="weather-rain ${rain>=40?'wet':''}"><b>${rain}%</b><small>RAIN</small></div></div><div class="weather-metrics"><div><b>${feel}°</b><small>FEELS</small></div><div><b>${wind}</b><small>WIND km/h</small></div><div><b>${gust}</b><small>GUST km/h</small></div><div><b>${prec.toFixed(1)}</b><small>RAIN mm</small></div></div><div class="weather-hours">${hourly}</div><div class="weather-actions"><button class="external-btn red" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button><span class="muted">Race-start forecast · UK time</span></div>`;
+  }catch{el.innerHTML=`<div class="eyebrow">RACE WEATHER</div><div class="card-title" style="margin-top:7px">Forecast unavailable</div><div class="muted" style="margin-top:5px">Pull to refresh or open the rain radar.</div><div class="spacer"></div><button class="external-btn" onclick="setRoute('radar:${r.round}')">OPEN RAIN RADAR</button>`;}
 }
 
 function renderRaces(){
@@ -468,9 +490,9 @@ async function renderRadar(round){
   await initRainRadar(r);
 }
 
-function renderRaceDetail(round){ const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('races');const c=CIRCUITS[r.Circuit.circuitId]||{},src=circuitSvg(r.Circuit.circuitId);view.innerHTML=`<div class="actions"><button class="external-btn" onclick="setRoute('races')">← CALENDAR</button></div><div class="spacer"></div><section class="hero" style="min-height:190px"><div class="hero-top"><span class="pill ${raceStatus(r)==='NEXT'?'live':'subtle'}">ROUND ${esc(r.round)}</span><span>${flag(r.Circuit.Location.country)}</span></div><h1>${esc(r.raceName.toUpperCase())}</h1><div class="circuit">${esc(r.Circuit.circuitName)}</div></section><div class="tabs"><button class="tab active" data-racetab="weekend">WEEKEND</button><button class="tab" data-racetab="results">RESULTS</button><button class="tab" data-racetab="updates">UPDATES</button><button class="tab" data-racetab="control">RACE CONTROL</button><button class="tab" data-racetab="radio">RADIO</button></div><div id="race-tab-content"></div>`;
+function renderRaceDetail(round){ const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('races');const c=CIRCUITS[r.Circuit.circuitId]||{},src=circuitSvg(r.Circuit.circuitId);view.innerHTML=`<div class="actions"><button class="external-btn" onclick="setRoute('races')">← CALENDAR</button></div><div class="spacer"></div><section class="hero" style="min-height:190px"><div class="hero-top"><span class="pill ${raceStatus(r)==='NEXT'?'live':'subtle'}">ROUND ${esc(r.round)}</span><span>${flag(r.Circuit.Location.country)}</span></div><h1>${esc(r.raceName.toUpperCase())}</h1><div class="circuit">${esc(r.Circuit.circuitName)}</div></section><div class="tabs"><button class="tab active" data-racetab="weekend">WEEKEND</button><button class="tab" data-racetab="results">RESULTS</button><button class="tab" data-racetab="control">RACE CONTROL</button><button class="tab" data-racetab="radio">RADIO</button></div><div id="race-tab-content"></div>`;
   const root=document.getElementById('race-tab-content'); const drawWeekend=()=>{root.innerHTML=`<div class="grid desktop-two"><div><div class="schedule-list">${sessionRows(r)}</div><div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button><button class="external-btn" onclick="setRoute('circuit:${r.round}')">TRACK INFO</button></div></div><div>${weatherCard(r)}${src?`<div class="spacer"></div><div class="card"><div class="track-img-wrap"><img class="track-img" src="${src}" alt="track layout"></div><div class="facts"><div class="fact"><b>${c.length||'—'} km</b><small>LENGTH</small></div><div class="fact"><b>${c.laps||'—'}</b><small>LAPS</small></div><div class="fact"><b>${c.turns||'—'}</b><small>TURNS</small></div></div></div>`:''}</div></div>`;loadWeatherIntoCard(r);}; drawWeekend();
-  document.querySelectorAll('[data-racetab]').forEach(b=>b.onclick=async()=>{document.querySelectorAll('[data-racetab]').forEach(x=>x.classList.remove('active'));b.classList.add('active');const t=b.dataset.racetab;if(t==='weekend')drawWeekend();else if(t==='results')await drawResults(root,r);else if(t==='updates')await drawCarUpdates(root,r);else if(t==='control')await drawRaceControl(root,r);else await drawRadio(root,r);});
+  document.querySelectorAll('[data-racetab]').forEach(b=>b.onclick=async()=>{document.querySelectorAll('[data-racetab]').forEach(x=>x.classList.remove('active'));b.classList.add('active');const t=b.dataset.racetab;if(t==='weekend')drawWeekend();else if(t==='results')await drawResults(root,r);else if(t==='control')await drawRaceControl(root,r);else await drawRadio(root,r);});
 }
 async function drawResults(root,r){
   root.innerHTML='<div class="loader">Loading classification…</div>';
@@ -691,11 +713,13 @@ async function drawCarUpdates(root,r){
   }
 }
 function renderUpdates(){
-  const rows=[...state.schedule].reverse().map(r=>{
-    const past=new Date(raceIso(r)).getTime()<Date.now(),status=past?'PAST WEEKEND':raceStatus(r)==='NEXT'?'CURRENT / NEXT':'UPCOMING';
+  const now=Date.now();
+  const available=[...state.schedule].filter(r=>{const first=sessions(r)[0]?.iso;return !!first&&new Date(first).getTime()<=now;}).reverse();
+  const rows=available.map(r=>{
+    const status=raceSessionDone(r)?'PAST WEEKEND':'CURRENT WEEKEND';
     return `<div class="card clickable development-race" onclick="setRoute('carupdates:${r.round}')"><div class="round-box"><small>ROUND</small><b>${esc(r.round)}</b></div><div><div class="race-name">${flag(r.Circuit.Location.country)} ${esc(r.raceName)}</div><div class="race-place">${esc(r.Circuit.circuitName)} · ${fmtDate(raceIso(r),{day:'numeric',month:'short'})}</div></div><div class="development-status">${status}<b>UPDATES ›</b></div></div>`;
   }).join('');
-  view.innerHTML=titleBlock(`${YEAR} SEASON`,'Car Development')+`<div class="card development-intro"><div class="eyebrow">OFFICIAL FIA SUBMISSIONS</div><div class="card-title" style="margin-top:5px">Race-by-race car updates</div><div class="muted" style="margin-top:5px">Component changes are taken from each weekend’s FIA Car Presentation Submission. Tap a round to see what every team declared.</div></div><div class="spacer"></div><div class="grid">${rows}</div><div class="source-note">The FIA submissions are the primary technical source. A weekend may show unavailable until its document is published.</div>`;
+  view.innerHTML=titleBlock(`${YEAR} SEASON`,'Car Development')+`<div class="card development-intro"><div class="eyebrow">OFFICIAL FIA SUBMISSIONS</div><div class="card-title" style="margin-top:5px">Race-by-race car updates</div><div class="muted" style="margin-top:5px">Only completed rounds and the active race weekend are shown. Tap a round to see what every team declared.</div></div><div class="spacer"></div>${rows?`<div class="grid">${rows}</div>`:'<div class="empty">No race weekend has started yet this season.</div>'}<div class="source-note">The FIA submissions are the primary technical source. The current weekend may remain unavailable until its Car Presentation Submission is published.</div>`;
 }
 async function renderCarUpdates(round){
   const r=state.schedule.find(x=>String(x.round)===String(round));if(!r)return setRoute('updates');
@@ -835,6 +859,34 @@ function deltaChart(a,b,names){
   const zero=H/2;
   return `<div class="card telemetry-chart delta-chart"><div class="telemetry-chart-head"><div><div class="eyebrow">LAP DELTA</div><div class="chart-unit">+ = ${esc(names[0])} slower · − = ${esc(names[0])} faster</div></div></div><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="36" y1="${zero}" x2="${W-36}" y2="${zero}" stroke="#777" stroke-dasharray="6 6"/><path d="${path}" fill="none" stroke="#ff4141" stroke-width="4" vector-effect="non-scaling-stroke"/></svg><div class="distance-axis"><span>START</span><span>0.000 s</span><span>FINISH</span></div></div>`;
 }
+function interpXY(series,p){
+  const pts=series.filter(x=>Number.isFinite(x.p)&&Number.isFinite(x.x)&&Number.isFinite(x.y));if(pts.length<2)return null;
+  let i=1;while(i<pts.length&&pts[i].p<p)i++;if(i>=pts.length)return {x:pts.at(-1).x,y:pts.at(-1).y};
+  const a=pts[Math.max(0,i-1)],b=pts[i],span=b.p-a.p;if(span<=0)return {x:b.x,y:b.y};const t=(p-a.p)/span;return {x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t};
+}
+function normalisedElapsed(series,p,lapDuration){
+  if(!series.length)return null;const raw=interpElapsed(series,p),start=interpElapsed(series,0),end=interpElapsed(series,1);
+  if(!Number.isFinite(raw)||!Number.isFinite(start)||!Number.isFinite(end)||end<=start)return null;
+  return (raw-start)/(end-start)*Number(lapDuration);
+}
+function deltaGainColour(gain,scale){
+  const strength=Math.min(1,Math.abs(gain)/Math.max(.001,scale));
+  if(Math.abs(gain)<.0015)return '#555';
+  return gain<0?mixHex('#6a2020','#ff3232',strength):mixHex('#17354d','#36aef5',strength);
+}
+function trackDeltaMapSvg(a,b,names,lapA,lapB){
+  const base=a.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)).length>=8?a:b;
+  if(base.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)).length<8)return `<div class="telemetry-map-empty">Track location unavailable for this comparison.</div>`;
+  const bins=180,samples=[];for(let i=0;i<=bins;i++){const p=i/bins,xy=interpXY(base,p),ta=normalisedElapsed(a,p,lapA.lap_duration),tb=normalisedElapsed(b,p,lapB.lap_duration);if(xy&&Number.isFinite(ta)&&Number.isFinite(tb))samples.push({p,x:xy.x,y:xy.y,delta:ta-tb});}
+  if(samples.length<20)return `<div class="telemetry-map-empty">Not enough matched track points for a time-gain map.</div>`;
+  let gains=[];for(let i=1;i<samples.length;i++)gains.push(samples[i].delta-samples[i-1].delta);
+  const smooth=gains.map((_,i)=>{let n=0,sum=0;for(let j=Math.max(0,i-3);j<=Math.min(gains.length-1,i+3);j++){sum+=gains[j];n++;}return sum/Math.max(1,n);});
+  const abs=smooth.map(Math.abs).sort((x,y)=>x-y),scale=abs[Math.floor(abs.length*.88)]||.01;
+  const xs=samples.map(p=>p.x),ys=samples.map(p=>p.y),xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(...ys),ymax=Math.max(...ys),W=720,H=430,pad=28,scl=Math.min((W-pad*2)/Math.max(1,xmax-xmin),(H-pad*2)/Math.max(1,ymax-ymin)),ox=(W-(xmax-xmin)*scl)/2,oy=(H-(ymax-ymin)*scl)/2,xy=p=>[ox+(p.x-xmin)*scl,H-(oy+(p.y-ymin)*scl)];
+  let shadow='',lines='';for(let i=1;i<samples.length;i++){const [x1,y1]=xy(samples[i-1]),[x2,y2]=xy(samples[i]),c=deltaGainColour(smooth[i-1]||0,scale);shadow+=`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`;lines+=`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${c}" stroke-width="8" stroke-linecap="round"/>`;}
+  const finish=Number(lapA.lap_duration)-Number(lapB.lap_duration),faster=finish<0?names[0]:finish>0?names[1]:'EVEN',margin=Math.abs(finish);
+  return `<div class="telemetry-map-title">${esc(names[0])} vs ${esc(names[1])}</div><div class="delta-map-summary"><b>${esc(faster)}${faster==='EVEN'?'':' faster'}</b><span>${faster==='EVEN'?'Same selected-lap time':margin.toFixed(3)+' s over the lap'}</span></div><svg class="speed-map delta-track-map" viewBox="0 0 ${W} ${H}" role="img" aria-label="Circuit map showing which driver gains time around the lap"><g stroke="#fff" stroke-width="14" opacity=".15" stroke-linecap="round">${shadow}</g>${lines}</svg><div class="delta-map-legend"><span><i class="a"></i>${esc(names[0])} faster</span><span><i class="neutral"></i>similar</span><span><i class="b"></i>${esc(names[1])} faster</span></div><div class="source-note compact">Colour is based on local change in cumulative lap delta, so braking zones and corners where one driver gains time stand out directly on the circuit.</div>`;
+}
 function sectorComparison(lapA,lapB,names){
   const rows=[['S1','duration_sector_1'],['S2','duration_sector_2'],['S3','duration_sector_3'],['LAP','lap_duration']];
   return `<div class="card sector-card"><div class="eyebrow">SECTOR COMPARISON</div><div class="sector-head"><b>${esc(names[0])}</b><span></span><b>${esc(names[1])}</b></div>${rows.map(([label,k])=>{const a=Number(lapA[k]),b=Number(lapB[k]),d=Number.isFinite(a)&&Number.isFinite(b)?a-b:null;return `<div class="sector-row"><div>${Number.isFinite(a)?formatLapSeconds(a):'—'}${d!=null&&d<0?`<small> ${Math.abs(d).toFixed(3)} faster</small>`:''}</div><b>${label}</b><div>${Number.isFinite(b)?formatLapSeconds(b):'—'}${d!=null&&d>0?`<small> ${Math.abs(d).toFixed(3)} faster</small>`:''}</div></div>`;}).join('')}</div>`;
@@ -875,7 +927,7 @@ async function renderTelemetry(round,key){
         const A=await fetchLapTelemetry(os.session_key,na,lpa);const B=await fetchLapTelemetry(os.session_key,nb,lpb);
         if(!A.length||!B.length)throw new Error('telemetry');
         const nameA=(dmap[String(na)]?.name_acronym||na),nameB=(dmap[String(nb)]?.name_acronym||nb),names=[nameA,nameB],rpmMax=Math.max(10000,...A.map(x=>x.rpm),...B.map(x=>x.rpm));
-        output.innerHTML=`<div class="spacer"></div><div class="grid two">${telemetrySummary(A,lpa,nameA)}${telemetrySummary(B,lpb,nameB)}</div><div class="spacer"></div>${sectorComparison(lpa,lpb,names)}<div class="spacer"></div>${telemetryLineChart('SPEED',A,B,x=>x.speed,'km/h',0,Math.max(360,...A.map(x=>x.speed),...B.map(x=>x.speed)),names)}<div class="spacer"></div>${deltaChart(A,B,names)}<div class="spacer"></div>${telemetryLineChart('THROTTLE',A,B,x=>x.throttle,'%',0,100,names)}<div class="spacer"></div>${telemetryLineChart('BRAKE',A,B,x=>x.brake,'0 / 100',0,100,names)}<div class="spacer"></div>${telemetryLineChart('GEAR',A,B,x=>x.gear,'gear',0,8,names)}<div class="spacer"></div>${telemetryLineChart('RPM',A,B,x=>x.rpm,'rpm',0,rpmMax,names)}<div class="spacer"></div>${titleBlock('SPEED MAP','Circuit-coloured Lap')}<div class="grid two"><div class="card speed-map-card">${trackSpeedMapSvg(A,`${nameA} · L${lpa.lap_number}`)}</div><div class="card speed-map-card">${trackSpeedMapSvg(B,`${nameB} · L${lpb.lap_number}`)}</div></div>`;
+        output.innerHTML=`<div class="spacer"></div><div class="grid two">${telemetrySummary(A,lpa,nameA)}${telemetrySummary(B,lpb,nameB)}</div><div class="spacer"></div>${sectorComparison(lpa,lpb,names)}<div class="spacer"></div>${titleBlock('TIME GAIN MAP','Who is faster where')}<div class="card speed-map-card delta-map-card">${trackDeltaMapSvg(A,B,names,lpa,lpb)}</div><div class="spacer"></div>${telemetryLineChart('SPEED',A,B,x=>x.speed,'km/h',0,Math.max(360,...A.map(x=>x.speed),...B.map(x=>x.speed)),names)}<div class="spacer"></div>${deltaChart(A,B,names)}<div class="spacer"></div>${telemetryLineChart('THROTTLE',A,B,x=>x.throttle,'%',0,100,names)}<div class="spacer"></div>${telemetryLineChart('BRAKE',A,B,x=>x.brake,'0 / 100',0,100,names)}<div class="spacer"></div>${telemetryLineChart('GEAR',A,B,x=>x.gear,'gear',0,8,names)}<div class="spacer"></div>${telemetryLineChart('RPM',A,B,x=>x.rpm,'rpm',0,rpmMax,names)}`;
       }catch(e){
         const status=Number(e?.status||e?.message);let msg='OpenF1 returned no usable car telemetry for one of these laps. Try Reload Comparison or choose another completed lap.';
         if(openF1LiveWindow(os))msg='This session is still inside OpenF1’s live-data window. Free telemetry becomes available about 30 minutes after the session ends.';

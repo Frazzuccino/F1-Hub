@@ -22,7 +22,7 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=1.4" />
+  <link rel="stylesheet" href="styles.css?v=1.6.0" />
 </head>
 <body>
   <div id="app-shell">
@@ -36,6 +36,8 @@
         <button id="refresh-btn" class="icon-btn" aria-label="Refresh">↻</button>
       </div>
     </header>
+
+    <div id="pull-indicator" class="pull-indicator" aria-hidden="true">PULL TO REFRESH</div>
 
     <main id="view" class="view" aria-live="polite"></main>
 
@@ -56,6 +58,6 @@
     <div class="install-actions"><button id="install-now" class="external-btn red">INSTALL</button><button id="install-later" class="external-btn">NOT NOW</button></div>
   </div>
   <div id="toast" class="toast" role="status"></div>
-  <script src="app.js?v=1.4"></script>
+  <script src="app.js?v=1.6.0"></script>
 </body>
 </html>

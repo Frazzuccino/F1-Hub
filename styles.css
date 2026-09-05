@@ -55,3 +55,89 @@ body.standalone .install-top-btn{display:none!important}
 .steward-link{display:block!important;width:100%!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;color:var(--text)!important;text-align:left!important;appearance:none!important;-webkit-appearance:none!important;cursor:pointer!important}.steward-link+.steward-link{border-top:0}.steward-link .steward-item{background:transparent;color:var(--text)}
 .fia-text-card{padding:16px}.fia-text-card p{margin:9px 0;color:#d9d9d9;font-size:13px;line-height:1.55}.fia-event-title{font-size:16px;font-weight:1000;letter-spacing:.2px;margin:3px 0 13px;color:#fff}.fia-text-row{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;padding:8px 0;border-bottom:1px solid #222;font-size:13px;line-height:1.4}.fia-text-key{color:#ff6868;font-size:10px;font-weight:950;letter-spacing:.6px;text-transform:uppercase;padding-top:2px}.fia-text-row+ p{margin-top:12px}
 @media(max-width:420px){.classification-head,.classification-row{grid-template-columns:32px minmax(0,1fr) auto}.class-time{font-size:12px}.fia-text-row{grid-template-columns:76px minmax(0,1fr)}}
+/* v1.4.2: completed weekend sessions open their classification */
+.session-row.done{cursor:pointer;border-color:#343434;transition:.14s transform,.14s border-color,.14s background}
+.session-row.done:active{transform:scale(.99);background:#171717;border-color:#666}
+.session-row.done .state{color:#ff5a5a}
+.session-row.live{border-color:#a82a2a;background:#1a0e0e;box-shadow:inset 3px 0 0 var(--red)}
+.session-row.live .state{color:#ff5151}
+.class-time small.class-gap{display:block;color:#888;font-size:9px;font-weight:850;margin-top:2px}
+
+
+/* v1.5.0: spoiler mode, strategy, history, records, pull-to-refresh, transitions */
+.view{transition:transform .18s ease}
+.view.pulling{transition:none!important}
+.view-enter{animation:viewEnter .2s ease both}
+@keyframes viewEnter{from{opacity:.58;transform:translateY(7px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.view-enter{animation:none}.view{transition:none}.card.clickable,.session-row.done{transition:none}}
+
+.pull-indicator{position:fixed;left:50%;top:72px;z-index:19;transform:translate(-50%,-12px);opacity:0;pointer-events:none;background:#171717;border:1px solid #393939;border-radius:999px;padding:7px 11px;color:#aaa;font-size:9px;font-weight:950;letter-spacing:.9px;transition:.16s opacity,.16s transform;box-shadow:0 8px 30px rgba(0,0,0,.35)}
+.pull-indicator.show{opacity:1;transform:translate(-50%,5px)}
+.pull-indicator.ready{color:#fff;border-color:#8f2626;background:#351111}
+
+.pill.spoiler{background:#38140f;color:#ff8a6e;border:1px solid #72281e}
+.spoiler-guard{border-color:#542222;background:linear-gradient(145deg,#1c1010,#111)}
+.spoiler-cover{border:1px dashed #533;border-radius:14px;padding:14px;background:#130d0d}
+.spoiler-result b{color:#777}
+
+.news-source-tabs{display:flex;gap:7px;overflow:auto;scrollbar-width:none;margin:2px 0 13px;padding-bottom:3px}
+.news-source-tabs::-webkit-scrollbar{display:none}
+.news-source-tabs .tab{flex:0 0 auto}
+.spoiler-news-card{min-height:96px;display:flex;align-items:center}
+
+.recap-card{border-color:#342525;background:linear-gradient(145deg,#171111,#101010)}
+.recap-hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:end;margin-top:8px}
+.recap-main{font-size:25px;font-weight:1000;line-height:1.04}
+.recap-sub{font-size:11px;color:#999;margin-top:5px}
+.recap-gap{text-align:right;font-size:16px;font-weight:1000;color:#ff6b6b;font-variant-numeric:tabular-nums}
+.recap-top3{display:grid;gap:6px;margin-top:13px}
+.recap-line{display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:8px;padding-top:7px;border-top:1px solid #292121;align-items:center}
+.recap-line b:last-child{font-variant-numeric:tabular-nums}
+
+.strategy-card{overflow:hidden}
+.strategy-list{display:grid;gap:0;margin-top:6px}
+.strategy-row{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:9px;align-items:center;padding:10px 0;border-top:1px solid #222}
+.strategy-row:first-child{border-top:0}
+.strategy-driver{font-weight:1000;font-size:13px}
+.strategy-stints{display:flex;align-items:center;gap:5px;overflow:auto;scrollbar-width:none}
+.strategy-stints::-webkit-scrollbar{display:none}
+.tyre{display:inline-flex;align-items:center;gap:5px;background:#0c0c0c;border:1px solid #2d2d2d;border-radius:999px;padding:5px 8px;font-size:9px;font-weight:900;white-space:nowrap}
+.tyre i{width:9px;height:9px;border-radius:50%;background:#777;box-shadow:0 0 0 2px #262626}
+.tyre.soft i{background:#ef3535}.tyre.medium i{background:#ffd942}.tyre.hard i{background:#eee}
+.tyre.intermediate i{background:#37cf67}.tyre.wet i{background:#3f8eff}
+.strategy-arrow{color:#5f5f5f;font-size:10px}
+.strategy-stops{text-align:right;color:#8a8a8a;font-size:9px;font-weight:850;white-space:nowrap}
+
+.history-selector select{width:100%;margin-top:8px;background:#0d0d0d;color:#fff;border:1px solid #333;border-radius:12px;padding:12px;font:inherit}
+.history-champion{min-height:108px}
+.history-race-card{display:grid;grid-template-columns:55px minmax(0,1fr) auto;gap:11px;align-items:center}
+.history-winner{text-align:right;display:flex;flex-direction:column;align-items:flex-end}
+.history-winner small{font-size:8px;color:#777;font-weight:900;letter-spacing:.8px}
+.history-winner b{font-size:12px;margin-top:3px}
+.history-leader{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid #222;font-size:12px}.history-leader:first-of-type{border-top:0}.history-leader span{color:#999;text-align:right}
+.record-section{margin:6px 0 18px}.record-section h2{font-size:18px;margin:8px 2px 10px}
+.record-card{min-height:112px}
+.record-value{font-size:24px;font-weight:1000;letter-spacing:-.5px;margin-top:7px;line-height:1.05}
+.record-holder{margin-top:5px;color:#a4a4a4;font-size:12px;font-weight:800}
+
+@media(max-width:520px){
+  .pull-indicator{top:68px}
+  .recap-main{font-size:22px}
+  .strategy-row{grid-template-columns:52px minmax(0,1fr) auto}
+  .strategy-driver{font-size:12px}
+  .tyre{padding:5px 7px}
+}
+
+
+/* v1.6.0: car development + post-session telemetry */
+.update-team-list{display:grid;gap:12px}.update-team-card{border-left:5px solid #555;padding:0;overflow:hidden}.update-team-head{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:14px;border-bottom:1px solid #252525}.update-count{font-size:10px;color:#888;font-weight:900}.update-item{padding:13px 14px;border-top:1px solid #222}.update-item:first-of-type{border-top:0}.update-item-top{display:flex;align-items:center;justify-content:space-between;gap:10px}.update-item-top b{font-size:14px}.update-badge{flex:0 0 auto;border:1px solid #3a3a3a;border-radius:999px;padding:4px 7px;font-size:8px;font-weight:1000;letter-spacing:.6px}.update-badge.new{background:#16361e;color:#7deda0;border-color:#285b34}.update-badge.modified{background:#2d2510;color:#ffd56b;border-color:#59491a}.update-badge.circuit{background:#142b3b;color:#79cfff;border-color:#28506a}.update-badge.cooling{background:#36161b;color:#ff8593;border-color:#652a34}.update-reason{margin-top:6px;color:#ff6b6b;font-size:10px;font-weight:900}.update-desc{margin-top:6px;color:#d1d1d1;font-size:12px;line-height:1.45}.update-details{margin-top:8px;color:#969696;font-size:11px}.update-details summary{cursor:pointer;color:#b8b8b8;font-weight:850}.update-details div{margin-top:6px;line-height:1.45}.development-intro{border-color:#343030}.development-race{display:grid;grid-template-columns:55px minmax(0,1fr) auto;gap:11px;align-items:center}.development-status{text-align:right;display:flex;flex-direction:column;align-items:flex-end;color:#777;font-size:8px;font-weight:900}.development-status b{color:#ff6666;font-size:10px;margin-top:4px}
+
+.telemetry-controls select{width:100%;margin-top:7px;background:#0d0d0d;color:#fff;border:1px solid #333;border-radius:12px;padding:11px;font:inherit}.telemetry-controls button:disabled{opacity:.45}.telemetry-summary .facts{grid-template-columns:repeat(3,1fr)}.telemetry-chart{padding:12px;overflow:hidden}.telemetry-chart-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:4px}.chart-unit{font-size:9px;color:#777;margin-top:3px}.telemetry-legend{display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end;font-size:9px;color:#aaa;font-weight:850}.telemetry-legend span{display:flex;align-items:center;gap:4px}.telemetry-legend i{width:14px;height:3px;border-radius:3px}.telemetry-legend i.a{background:#ff3636}.telemetry-legend i.b{background:#efefef}.telemetry-chart svg{display:block;width:100%;height:210px;background:linear-gradient(180deg,#101010,#0b0b0b);border-radius:12px}.distance-axis{display:flex;justify-content:space-between;color:#606060;font-size:8px;font-weight:900;margin:5px 3px 0}.sector-card{overflow:hidden}.sector-head,.sector-row{display:grid;grid-template-columns:1fr 52px 1fr;gap:8px;align-items:center;text-align:center}.sector-head{padding:11px 0 7px;color:#aaa;font-size:11px}.sector-row{padding:10px 0;border-top:1px solid #222;font-variant-numeric:tabular-nums;font-size:13px;font-weight:900}.sector-row>b{font-size:9px;color:#777;letter-spacing:.8px}.sector-row small{display:block;color:#55ce7c;font-size:8px;margin-top:2px}.speed-map-card{padding:10px;overflow:hidden}.telemetry-map-title{text-align:center;font-size:12px;font-weight:1000;margin:4px 0 8px}.speed-map{display:block;width:100%;height:auto;aspect-ratio:720/430;background:radial-gradient(circle at 50% 45%,#151515,#090909);border-radius:14px}.speed-legend{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;color:#777;font-size:8px;font-weight:900;margin:7px 4px 1px}.speed-legend i{height:5px;border-radius:999px;background:linear-gradient(90deg,#2d7dff,#40d878,#ff3434)}.telemetry-map-empty{min-height:180px;display:flex;align-items:center;justify-content:center;text-align:center;color:#777;font-size:11px}.delta-chart .chart-unit{max-width:360px}
+
+@media(max-width:520px){
+  .development-race{grid-template-columns:50px minmax(0,1fr) auto}.development-status{max-width:70px}
+  .telemetry-summary .facts{grid-template-columns:repeat(2,1fr)}
+  .telemetry-chart svg{height:180px}
+  .telemetry-chart-head{display:block}.telemetry-legend{justify-content:flex-start;margin-top:7px}
+  .sector-head,.sector-row{grid-template-columns:1fr 42px 1fr}
+}

@@ -4,7 +4,7 @@ F1 Hub is an unofficial personal project and is not affiliated with Formula 1, t
 
 - Jolpica F1 API — current/historical Formula 1 calendar, standings and classification data.
 - OpenF1 — post-session classifications, tyre stints, lap metadata, race control, team radio and driver headshots where available.
-- Formula 1 official static timing archive — post-session compressed CarData/Position streams used for telemetry and circuit time-gain maps.
+- Formula 1 official static timing archive — retained as a legacy/pre-2026 telemetry fallback where usable; 2026 telemetry does not rely on its CarData stream.
 - Open-Meteo — weather forecast data.
 - BBC Sport Formula 1 RSS — news headlines; stories open at the publisher.
 - Autosport RSS — Formula 1 news headlines; stories open at the publisher.
@@ -13,9 +13,9 @@ F1 Hub is an unofficial personal project and is not affiliated with Formula 1, t
 - The Race RSS — Formula 1 news headlines where its feed is reachable; stories open at the publisher.
 - rss2json — browser-side RSS-to-JSON transport.
 - FIA — official steward/document source and official Car Presentation Submissions used for the Car Development section.
-- Jina Reader — readable-text extraction of publicly accessible FIA PDFs for the in-app steward document view, and a browser-compatible text bridge for live-timing fallback snapshots.
-- Formula-Timing — free live-timing webpage used as one fallback snapshot/source link when the primary relay is unavailable.
-- F1 Live Data — free live-timing webpage used as another fallback snapshot/source link when earlier sources are unavailable.
+- Jina Reader — readable-text extraction of publicly accessible FIA PDFs for the in-app steward document view.
+- Formula-Timing — free live-timing webpage provided as an external fallback link when validated in-app live data is unavailable.
+- F1 Live Data — free live-timing dashboard used as an embedded/external fallback when validated in-app live data is unavailable; its HTML is not scraped into F1 Hub classifications.
 - RacingNews365 and timepenalty — public penalty/reprimand reference pages; F1 Hub stores only small derived counts/expiry information and links back to sources.
 - Wikipedia / Wikimedia Commons — fallback driver profile images when an OpenF1 headshot is unavailable. Arvid Lindblad uses the CC0 Wikimedia Commons image “Arvid lindblad Budapest 2026.jpg”.
 - MasterPlay007/F1-Track-Layouts-SVG — circuit SVG assets (repository states CC0-1.0).

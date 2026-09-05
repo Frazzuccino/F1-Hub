@@ -17,7 +17,7 @@ const PENALTY_SOURCE = 'https://racingnews365.com/penalty-points-f1-drivers';
 const REPRIMAND_SOURCE = 'https://timepenalty.com/guide/reprimand';
 const JINA = 'https://r.jina.ai/';
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -82,7 +82,7 @@ const FALLBACK_REPRIMANDS = {'Gabriel Bortoleto':1,'Oliver Bearman':1,'Alex Albo
 const state = {
   route:'home', schedule:[], drivers:[], constructors:[], photos:{}, wikiPhotos:{}, news:[], newsSource:'ALL', spoilerNewsRevealedRound:null, standingsSpoilerRevealedRound:null,
   penaltyPoints:{...FALLBACK_POINTS}, reprimands:{...FALLBACK_REPRIMANDS}, stewardDocs:{}, historyYear:YEAR-1, historyCache:{}, carUpdateDocs:{},
-  loaded:false, refreshing:false, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null
+  loaded:false, refreshing:false, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null
 };
 const view = document.getElementById('view');
 
@@ -104,9 +104,9 @@ function age(dob){ if(!dob)return '—'; const d=new Date(dob+'T12:00:00Z'),n=ne
 function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),1800); }
 function cacheGet(key,maxAge){ try{const x=JSON.parse(localStorage.getItem('f1hub:'+key)); if(!x)return null;if(maxAge && Date.now()-x.t>maxAge)return null;return x.v;}catch{return null;} }
 function cachePut(key,v){ try{localStorage.setItem('f1hub:'+key,JSON.stringify({t:Date.now(),v}));}catch{} return v; }
-async function fetchJSON(url,key,maxAge=15*60e3){
+async function fetchJSON(url,key,maxAge=15*60e3,timeoutMs=14000){
   const fresh=cacheGet(key,maxAge); if(fresh)return fresh;
-  try{const c=new AbortController();const t=setTimeout(()=>c.abort(),14000);const r=await fetch(url,{signal:c.signal});clearTimeout(t);if(!r.ok)throw new Error(`${r.status}`);return cachePut(key,await r.json());}
+  try{const c=new AbortController();const t=setTimeout(()=>c.abort(),timeoutMs);const r=await fetch(url,{signal:c.signal});clearTimeout(t);if(!r.ok){const err=new Error(`${r.status}`);err.status=r.status;throw err;}return cachePut(key,await r.json());}
   catch(e){const old=cacheGet(key);if(old)return old;throw e;}
 }
 async function fetchText(url,key,maxAge=30*60e3){
@@ -147,18 +147,33 @@ function spoilerRace(){
   const today=ukDateKey(new Date());
   return state.schedule.find(r=>{const ss=sessions(r);if(!ss.length)return false;const first=ukDateKey(ss[0].iso),raceDay=ukDateKey(raceIso(r));return today>=first&&today<=raceDay;})||null;
 }
-function spoilerActive(){return !!spoilerRace();}
-function isSpoilerRace(r){const x=spoilerRace();return !!x&&String(x.round)===String(r?.round);}
+function spoilerPrefKey(r){return `f1hub:spoiler-${YEAR}-${r?.round||'none'}`;}
+function spoilerPreference(r){
+  if(!r)return false;
+  const v=localStorage.getItem(spoilerPrefKey(r));
+  return v!=='off'; // each race weekend defaults to protected
+}
+function spoilerActive(){const r=spoilerRace();return !!r&&spoilerPreference(r);}
+function isSpoilerRace(r){const x=spoilerRace();return spoilerActive()&&!!x&&String(x.round)===String(r?.round);}
 function raceSessionDone(r){const rs=sessions(r).find(x=>x.key==='race');return !!rs&&sessionIsDone(rs);}
+function toggleSpoilerMode(){
+  const r=spoilerRace();
+  if(!r){toast('Spoiler Mode only runs during the current race weekend');return;}
+  const turnOn=!spoilerActive();
+  try{localStorage.setItem(spoilerPrefKey(r),turnOn?'on':'off');}catch{}
+  if(turnOn){state.spoilerNewsRevealedRound=null;state.standingsSpoilerRevealedRound=null;}
+  render();toast(`Spoiler Mode ${turnOn?'on':'off'}`);
+}
 function revealNewsSpoilers(){const sr=spoilerRace();state.spoilerNewsRevealedRound=sr?String(sr.round):null;renderNews();}
 function revealStandingsSpoilers(){const sr=spoilerRace();state.standingsSpoilerRevealedRound=sr?String(sr.round):null;renderStandings();}
 function newsSpoilersRevealed(){const sr=spoilerRace();return !!sr&&state.spoilerNewsRevealedRound===String(sr.round);}
 function standingsSpoilersRevealed(){const sr=spoilerRace();return !!sr&&state.standingsSpoilerRevealedRound===String(sr.round);}
-window.revealNewsSpoilers=revealNewsSpoilers;window.revealStandingsSpoilers=revealStandingsSpoilers;
+window.toggleSpoilerMode=toggleSpoilerMode;window.revealNewsSpoilers=revealNewsSpoilers;window.revealStandingsSpoilers=revealStandingsSpoilers;
 
 function circuitSvg(id){ const c=CIRCUITS[id]; if(!c)return null; if(c.f1db)return `https://raw.githubusercontent.com/f1db/f1db/main/src/assets/circuits/white/${c.f1db}`; return c.slug?`https://raw.githubusercontent.com/MasterPlay007/F1-Track-Layouts-SVG/main/${c.slug}.svg`:null; }
 function radarUrl(r){ const l=r.Circuit.Location; return `https://www.windy.com/-Weather-radar-radar?radar,${Number(l.lat).toFixed(4)},${Number(l.long).toFixed(4)},9`; }
-function radarEmbedUrl(r){ const l=r.Circuit.Location; const q=new URLSearchParams({type:'map',location:'coordinates',metricRain:'mm',metricTemp:'°C',metricWind:'km/h',zoom:'8',overlay:'radar',product:'radar',level:'surface',lat:String(l.lat),lon:String(l.long),detailLat:String(l.lat),detailLon:String(l.long),message:'true',marker:'true'}); return `https://embed.windy.com/embed.html?${q.toString()}`; }
+const CIRCUIT_GEOJSON='https://raw.githubusercontent.com/bacinger/f1-circuits/refs/heads/master/f1-circuits.geojson';
+const RAINVIEWER_API='https://api.rainviewer.com/public/weather-maps.json';
 function isStandalone(){ return window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches || window.navigator.standalone===true; }
 function wikiTitle(d){ try{ return decodeURIComponent(new URL(d?.url||'').pathname.split('/').pop()||'').replaceAll('_',' '); }catch{return '';} }
 async function loadWikipediaPhotos(force=false){
@@ -255,7 +270,7 @@ function parseReprimands(text){
 function parentNav(route){ if(route==='home'||route==='races'||route==='standings'||route==='news'||route==='more')return route; if(route.startsWith('race:')||route.startsWith('session:')||route.startsWith('telemetry:')||route.startsWith('carupdates:')||route.startsWith('circuit:')||route.startsWith('radar:'))return 'races'; return 'more'; }
 function setRoute(route,push=true){ if(!route)return; state.route=route; if(push && location.hash!==`#${encodeURIComponent(route)}`)history.pushState({route},'',`#${encodeURIComponent(route)}`); window.scrollTo({top:0,behavior:'instant'}); const parent=parentNav(route);document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',parent===b.dataset.route)); render(); }
 function render(){
-  clearInterval(state.countdownTimer);
+  clearInterval(state.countdownTimer);clearInterval(state.radarTimer);state.radarTimer=null;
   view.classList.remove('view-enter');
   void view.offsetWidth;
   view.classList.add('view-enter');
@@ -269,6 +284,16 @@ function render(){
 }
 function titleBlock(eyebrow,title,right=''){ return `<div class="section-head"><div><div class="eyebrow">${esc(eyebrow)}</div><h1>${esc(title)}</h1></div>${right}</div>`; }
 function spoilerPill(){return spoilerActive()?'<span class="pill spoiler">SPOILER MODE</span>':'';}
+function spoilerToggleHtml(compact=false){
+  const r=spoilerRace();if(!r)return '';
+  const on=spoilerActive();
+  return `<button class="spoiler-toggle ${on?'on':'off'} ${compact?'compact':''}" onclick="toggleSpoilerMode()" aria-pressed="${on?'true':'false'}" aria-label="Turn Spoiler Mode ${on?'off':'on'}"><span class="switch-track"><i></i></span><b>${on?'ON':'OFF'}</b></button>`;
+}
+function spoilerSettingsCard(){
+  const r=spoilerRace();
+  if(r)return `<div class="card spoiler-settings"><div><div class="eyebrow">RACE-WEEKEND SPOILERS</div><div class="card-title">Spoiler Mode</div><div class="muted">Starts on the first session day and ends automatically the day after the race. Your choice only applies to this weekend.</div></div>${spoilerToggleHtml()}</div>`;
+  return `<div class="card spoiler-settings"><div><div class="eyebrow">RACE-WEEKEND SPOILERS</div><div class="card-title">Spoiler Mode · Auto</div><div class="muted">It will switch on automatically when the next race weekend starts, then switch off the day after the race.</div></div><span class="pill subtle">AUTO</span></div>`;
+}
 
 function countdownHtml(iso){ return `<div class="countdown" data-countdown="${esc(iso)}"><div class="count-cell"><b data-c="d">00</b><small>DAYS</small></div><div class="count-cell"><b data-c="h">00</b><small>HOURS</small></div><div class="count-cell"><b data-c="m">00</b><small>MIN</small></div><div class="count-cell"><b data-c="s">00</b><small>SEC</small></div></div>`; }
 function startCountdown(){ const el=document.querySelector('[data-countdown]'); if(!el)return; const tick=()=>{let d=Math.max(0,new Date(el.dataset.countdown)-new Date()),days=Math.floor(d/864e5);d%=864e5;let h=Math.floor(d/36e5);d%=36e5;let m=Math.floor(d/6e4);let s=Math.floor((d%6e4)/1000);[['d',days],['h',h],['m',m],['s',s]].forEach(([k,v])=>{const x=el.querySelector(`[data-c="${k}"]`);if(x)x.textContent=String(v).padStart(2,'0');});};tick();state.countdownTimer=setInterval(tick,1000); }
@@ -289,7 +314,8 @@ function renderHome(){
   const r=currentRace(); if(!r){view.innerHTML='<div class="empty">No race calendar available.</div>';return;} const ns=nextSession(r); const isWeekend=raceStatus(r)==='NEXT',spoilers=spoilerActive();
   const hideChamp=spoilers&&raceSessionDone(r)&&!standingsSpoilersRevealed();
   view.innerHTML=`
-    <section class="hero"><div class="hero-top"><span class="pill ${isWeekend?'live':'subtle'}">${isWeekend?'RACE WEEKEND':'NEXT ROUND'}</span><span>${spoilers?spoilerPill():''} ${flag(r.Circuit.Location.country)} ROUND ${esc(r.round)}</span></div>
+    <section class="hero"><div class="hero-top"><span class="pill ${isWeekend?'live':'subtle'}">${isWeekend?'RACE WEEKEND':'NEXT ROUND'}</span><span class="round-meta"><i>${flag(r.Circuit.Location.country)}</i><span>ROUND</span><b>${esc(r.round)}</b></span></div>
+      ${spoilerRace()?`<div class="hero-spoiler"><div><b>SPOILER MODE</b><small>${spoilers?'Results & headlines protected':'Protection paused for this weekend'}</small></div>${spoilerToggleHtml(true)}</div>`:''}
       <h1>${esc(r.raceName.toUpperCase())}</h1><div class="circuit">${esc(r.Circuit.circuitName)} · ${esc(r.Circuit.Location.locality)}</div>
       ${ns?`<div class="next-session"><div class="label">NEXT SESSION</div><div class="name">${esc(ns.name)}</div><div class="time">${fmtDateTime(ns.iso)} · UK</div></div>${countdownHtml(ns.iso)}`:`<div class="next-session"><div class="name">Race weekend complete</div></div>`}
     </section>
@@ -343,7 +369,7 @@ function renderMore(){ const installed=isAppInstalled(); const canInstall=!!stat
   ${menu('👤','Drivers','Profiles, photos & season stats','drivers')}${menu('🏎','Teams','Constructors & points','teams')}${menu('🗺','Circuits','Layouts & track facts','circuits')}${menu('🟨','Penalty Points','Licence points & reprimands','penalties')}
   ${menu('⚔️','Teammate Battles','Qualifying & race H2H','battles')}${menu('🚨','Stewards','Latest FIA decisions','stewards')}${menu('📊','Season Stats','Wins, podiums & DNFs','stats')}${menu('↔','Driver Compare','Compare two drivers','compare')}
   ${menu('🛠️','Car Development','Race-by-race technical updates','updates')}${menu('🕰️','F1 History','Seasons & race results','history')}${menu('🏅','F1 Records','All-time records & milestones','records')}
-  </div>${install}<div class="source-note">F1 Hub v${APP_VERSION} · Personal unofficial Formula 1 companion. Live/current data comes from free public sources and is cached locally.</div>`;
+  </div><div class="spacer"></div>${spoilerSettingsCard()}${install}<div class="source-note">F1 Hub v${APP_VERSION} · Personal unofficial Formula 1 companion. Live/current data comes from free public sources and is cached locally.</div>`;
   document.getElementById('install-btn')?.addEventListener('click',requestInstall);
 }
 function menu(icon,title,sub,route){return `<div class="menu-card" onclick="setRoute('${route}')"><div class="icon">${icon}</div><b>${esc(title)}</b><small>${esc(sub)}</small></div>`;}
@@ -373,7 +399,74 @@ async function loadCircuitHistoryInto(r){
   }catch{root.innerHTML='<div class="card"><div class="empty">Circuit history is unavailable right now.</div></div>';}
 }
 
-async function renderRadar(round){ const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('races');const l=r.Circuit.Location;view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('race:${r.round}')">← BACK</button></div><div class="spacer"></div>${titleBlock('LIVE WEATHER RADAR',r.Circuit.circuitName)}<div class="radar-card"><iframe class="radar-frame" src="${esc(radarEmbedUrl(r))}" title="Weather radar for ${esc(r.Circuit.circuitName)}" loading="eager" allowfullscreen></iframe></div><div class="spacer"></div><div class="actions"><a class="external-btn red" href="${esc(radarUrl(r))}" target="_blank" rel="noopener">OPEN FULL RADAR ↗</a><button class="external-btn" onclick="setRoute('race:${r.round}')">RACE HUB</button></div><div class="source-note">Radar is centred on ${esc(l.locality)}, ${esc(l.country)} using the circuit coordinates.</div>`; }
+function flattenGeoCoordinates(geometry){
+  if(!geometry)return [];
+  if(geometry.type==='LineString')return geometry.coordinates||[];
+  if(geometry.type==='MultiLineString')return (geometry.coordinates||[]).flat();
+  if(geometry.type==='Polygon')return (geometry.coordinates||[]).flat();
+  if(geometry.type==='MultiPolygon')return (geometry.coordinates||[]).flat(2);
+  return [];
+}
+function haversineKm(lat1,lon1,lat2,lon2){
+  const R=6371,toRad=x=>x*Math.PI/180,dLat=toRad(lat2-lat1),dLon=toRad(lon2-lon1);
+  const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+function nearestCircuitFeature(geo,r){
+  const lat=Number(r.Circuit.Location.lat),lon=Number(r.Circuit.Location.long);let best=null,bestD=Infinity;
+  for(const f of geo?.features||[]){
+    const pts=flattenGeoCoordinates(f.geometry).filter(x=>Array.isArray(x)&&Number.isFinite(Number(x[0]))&&Number.isFinite(Number(x[1])));if(!pts.length)continue;
+    const clat=pts.reduce((a,x)=>a+Number(x[1]),0)/pts.length,clon=pts.reduce((a,x)=>a+Number(x[0]),0)/pts.length,d=haversineKm(lat,lon,clat,clon);
+    if(d<bestD){best=f;bestD=d;}
+  }
+  return bestD<80?best:null;
+}
+function radarFrameLabel(frame,i,total){
+  const iso=new Date(Number(frame.time)*1000).toISOString(),latest=i===total-1?' · LATEST':'';
+  return `${fmtDateTime(iso)}${latest}`;
+}
+async function initRainRadar(r){
+  const mapEl=document.getElementById('radar-map'),status=document.getElementById('radar-status');if(!mapEl||!status)return;
+  const l=r.Circuit.Location,lat=Number(l.lat),lon=Number(l.long);
+  if(!window.L){status.textContent='Interactive radar library could not load. Use Open Windy below.';return;}
+  try{
+    const map=L.map(mapEl,{zoomControl:true,attributionControl:true,minZoom:5,maxZoom:16}).setView([lat,lon],11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
+    L.circleMarker([lat,lon],{radius:4,color:'#fff',weight:2,fillColor:'#ff1e1e',fillOpacity:1}).addTo(map);
+    setTimeout(()=>map.invalidateSize(),80);
+
+    // Georeferenced WGS84 circuit path: the outline keeps the real-world
+    // orientation/location while the map is panned or zoomed.
+    try{
+      const geo=await fetchJSON(CIRCUIT_GEOJSON,'circuit-geojson',30*864e5,22000),feature=nearestCircuitFeature(geo,r);
+      if(feature){
+        const halo=L.geoJSON(feature,{style:{color:'#050505',weight:9,opacity:.9,lineCap:'round',lineJoin:'round'}}).addTo(map);
+        L.geoJSON(feature,{style:{color:'#ff3434',weight:4,opacity:1,lineCap:'round',lineJoin:'round'}}).addTo(map);
+        const bounds=halo.getBounds();if(bounds.isValid())map.fitBounds(bounds.pad(1.4),{maxZoom:11});
+        document.getElementById('radar-track-status').textContent='Circuit outline locked to real map coordinates';
+      }else document.getElementById('radar-track-status').textContent='Circuit outline unavailable for this venue';
+    }catch{document.getElementById('radar-track-status').textContent='Circuit outline could not be loaded';}
+
+    const rv=await fetchJSON(RAINVIEWER_API,'rainviewer-frames',90e3,18000),frames=rv?.radar?.past||[];
+    if(!frames.length)throw new Error('No radar frames');
+    let idx=frames.length-1,radarLayer=null,playing=false;
+    const prev=document.getElementById('radar-prev'),play=document.getElementById('radar-play'),next=document.getElementById('radar-next');
+    const setFrame=(n)=>{
+      idx=(n+frames.length)%frames.length;const frame=frames[idx];if(radarLayer)map.removeLayer(radarLayer);
+      radarLayer=L.tileLayer(`${rv.host}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`,{opacity:.68,maxNativeZoom:7,maxZoom:16,zIndex:220,attribution:'Radar © RainViewer'}).addTo(map);
+      status.textContent=radarFrameLabel(frame,idx,frames.length);prev.disabled=idx===0;next.disabled=idx===frames.length-1;
+    };
+    const stop=()=>{playing=false;clearInterval(state.radarTimer);state.radarTimer=null;play.textContent='▶ PLAY';};
+    prev.onclick=()=>{stop();setFrame(Math.max(0,idx-1));};next.onclick=()=>{stop();setFrame(Math.min(frames.length-1,idx+1));};
+    play.onclick=()=>{if(playing){stop();return;}playing=true;play.textContent='Ⅱ PAUSE';state.radarTimer=setInterval(()=>{if(idx>=frames.length-1){idx=0;}else idx++;setFrame(idx);},700);};
+    setFrame(idx);
+  }catch(e){status.textContent='Rain radar could not be loaded. Use Open Windy below.';mapEl.innerHTML='<div class="radar-fallback">Radar temporarily unavailable</div>';}
+}
+async function renderRadar(round){
+  const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('races');const l=r.Circuit.Location;
+  view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('race:${r.round}')">← BACK</button></div><div class="spacer"></div>${titleBlock('WEATHER RADAR',r.Circuit.circuitName)}<div class="card radar-info"><div><div class="eyebrow">RADAR FRAME</div><div id="radar-status" class="card-title">Loading latest radar…</div><div id="radar-track-status" class="muted">Loading circuit outline…</div></div><div class="radar-controls"><button id="radar-prev" class="mini-btn" aria-label="Previous radar frame">‹</button><button id="radar-play" class="mini-btn wide">▶ PLAY</button><button id="radar-next" class="mini-btn" aria-label="Next radar frame">›</button></div></div><div class="radar-card"><div id="radar-map" class="radar-map" aria-label="Weather radar with ${esc(r.Circuit.circuitName)} circuit outline"></div></div><div class="spacer"></div><div class="actions"><a class="external-btn red" href="${esc(radarUrl(r))}" target="_blank" rel="noopener">OPEN WINDY ↗</a><button class="external-btn" onclick="setRoute('race:${r.round}')">RACE HUB</button></div><div class="source-note">RainViewer radar is shown over OpenStreetMap. The red circuit line uses georeferenced track coordinates, so its position and orientation stay aligned with the real circuit as you pan or zoom.</div>`;
+  await initRainRadar(r);
+}
 
 function renderRaceDetail(round){ const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('races');const c=CIRCUITS[r.Circuit.circuitId]||{},src=circuitSvg(r.Circuit.circuitId);view.innerHTML=`<div class="actions"><button class="external-btn" onclick="setRoute('races')">← CALENDAR</button></div><div class="spacer"></div><section class="hero" style="min-height:190px"><div class="hero-top"><span class="pill ${raceStatus(r)==='NEXT'?'live':'subtle'}">ROUND ${esc(r.round)}</span><span>${flag(r.Circuit.Location.country)}</span></div><h1>${esc(r.raceName.toUpperCase())}</h1><div class="circuit">${esc(r.Circuit.circuitName)}</div></section><div class="tabs"><button class="tab active" data-racetab="weekend">WEEKEND</button><button class="tab" data-racetab="results">RESULTS</button><button class="tab" data-racetab="updates">UPDATES</button><button class="tab" data-racetab="control">RACE CONTROL</button><button class="tab" data-racetab="radio">RADIO</button></div><div id="race-tab-content"></div>`;
   const root=document.getElementById('race-tab-content'); const drawWeekend=()=>{root.innerHTML=`<div class="grid desktop-two"><div><div class="schedule-list">${sessionRows(r)}</div><div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button><button class="external-btn" onclick="setRoute('circuit:${r.round}')">TRACK INFO</button></div></div><div>${weatherCard(r)}${src?`<div class="spacer"></div><div class="card"><div class="track-img-wrap"><img class="track-img" src="${src}" alt="track layout"></div><div class="facts"><div class="fact"><b>${c.length||'—'} km</b><small>LENGTH</small></div><div class="fact"><b>${c.laps||'—'}</b><small>LAPS</small></div><div class="fact"><b>${c.turns||'—'}</b><small>TURNS</small></div></div></div>`:''}</div></div>`;loadWeatherIntoCard(r);}; drawWeekend();
@@ -627,6 +720,21 @@ function rangeUrl(endpoint,sessionKey,driverNumber,start,end){
   u.searchParams.set('date>=',start);u.searchParams.set('date<=',end);
   return u.toString();
 }
+let telemetryQueue=Promise.resolve(),telemetryLastRequest=0;
+function telemetryFetchJSON(url,key,maxAge=7*864e5,timeoutMs=28000){
+  const fresh=cacheGet(key,maxAge);if(fresh)return Promise.resolve(fresh);
+  const run=async()=>{
+    const gap=Math.max(0,410-(Date.now()-telemetryLastRequest));if(gap)await sleep(gap);
+    telemetryLastRequest=Date.now();
+    let lastErr;
+    for(let attempt=0;attempt<3;attempt++){
+      try{return await fetchJSON(url,key,maxAge,timeoutMs);}
+      catch(e){lastErr=e;const status=Number(e?.status||e?.message);if(status!==429)throw e;await sleep(1100*(attempt+1));telemetryLastRequest=Date.now();}
+    }
+    throw lastErr||new Error('telemetry request failed');
+  };
+  const job=telemetryQueue.then(run,run);telemetryQueue=job.catch(()=>{});return job;
+}
 function median(nums){
   const a=nums.filter(Number.isFinite).sort((x,y)=>x-y);if(!a.length)return 0;const m=Math.floor(a.length/2);return a.length%2?a[m]:(a[m-1]+a[m])/2;
 }
@@ -635,8 +743,8 @@ function nearestCarData(car,t,idx){
   return [car[idx]||{},idx];
 }
 function buildTelemetrySeries(car,loc,startMs){
-  car=(car||[]).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
-  loc=(loc||[]).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+  car=(car||[]).filter(x=>Number.isFinite(new Date(x.date).getTime())).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+  loc=(loc||[]).filter(x=>Number.isFinite(new Date(x.date).getTime())&&Number.isFinite(Number(x.x))&&Number.isFinite(Number(x.y))&&!(Number(x.x)===0&&Number(x.y)===0)).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
   if(!car.length)return [];
   if(loc.length<5){
     const first=new Date(car[0].date).getTime(),last=new Date(car.at(-1).date).getTime(),span=Math.max(1,last-first);
@@ -653,14 +761,39 @@ function buildTelemetrySeries(car,loc,startMs){
   const total=Math.max(1,dist);for(const p of pts)p.p=Math.max(0,Math.min(1,p.dist/total));
   return pts;
 }
+function telemetryWindow(lap){
+  const exactStart=new Date(lap.date_start).getTime();if(!Number.isFinite(exactStart))throw new Error('lap start missing');
+  const duration=Math.max(20,Number(lap.lap_duration)||120),exactEnd=exactStart+duration*1000;
+  return {exactStart,exactEnd,queryStart:exactStart-8000,queryEnd:exactEnd+12000};
+}
+function sliceTelemetryRows(rows,startMs,endMs){return (rows||[]).filter(x=>{const t=new Date(x.date).getTime();return Number.isFinite(t)&&t>=startMs&&t<=endMs;});}
 async function fetchLapTelemetry(sessionKey,driverNumber,lap){
-  const start=new Date(lap.date_start),duration=Math.max(20,Number(lap.lap_duration)||120),end=new Date(start.getTime()+(duration+2)*1000);
-  const s=start.toISOString(),e=end.toISOString(),key=`telemetry-${sessionKey}-${driverNumber}-${lap.lap_number}`;
-  const [car,loc]=await Promise.all([
-    fetchJSON(rangeUrl('car_data',sessionKey,driverNumber,s,e),`${key}-car`,7*864e5),
-    fetchJSON(rangeUrl('location',sessionKey,driverNumber,s,e),`${key}-loc`,7*864e5)
-  ]);
-  return buildTelemetrySeries(car,loc,start.getTime());
+  const w=telemetryWindow(lap),s=new Date(w.queryStart).toISOString(),e=new Date(w.queryEnd).toISOString(),key=`telemetry-${sessionKey}-${driverNumber}-${lap.lap_number}-v2`;
+  let car=[],loc=[];
+  try{car=await telemetryFetchJSON(rangeUrl('car_data',sessionKey,driverNumber,s,e),`${key}-car`,7*864e5);}catch(e){if(Number(e?.status||e?.message)===401||Number(e?.status||e?.message)===403)throw e;}
+  try{loc=await telemetryFetchJSON(rangeUrl('location',sessionKey,driverNumber,s,e),`${key}-loc`,7*864e5);}catch{}
+  // OpenF1 lap start times and telemetry timestamps can sit a few seconds apart.
+  // If the ranged lookup comes back empty, fetch that driver's session once and
+  // slice it locally instead of failing the comparison.
+  if(car.length<8){
+    const full=await telemetryFetchJSON(`${OPENF1}/car_data?session_key=${encodeURIComponent(sessionKey)}&driver_number=${encodeURIComponent(driverNumber)}`,`telemetry-full-car-${sessionKey}-${driverNumber}`,7*864e5,35000);
+    car=sliceTelemetryRows(full,w.queryStart,w.queryEnd);
+  }
+  if(loc.length<5){
+    try{
+      const fullLoc=await telemetryFetchJSON(`${OPENF1}/location?session_key=${encodeURIComponent(sessionKey)}&driver_number=${encodeURIComponent(driverNumber)}`,`telemetry-full-loc-${sessionKey}-${driverNumber}`,7*864e5,35000);
+      loc=sliceTelemetryRows(fullLoc,w.queryStart,w.queryEnd);
+    }catch{loc=[];}
+  }
+  // Query with padding for reliability, then tighten the plotted samples back
+  // around the timed lap so the distance axis is not distorted by the padding.
+  const tightStart=w.exactStart-2000,tightEnd=w.exactEnd+4000,tightCar=sliceTelemetryRows(car,tightStart,tightEnd),tightLoc=sliceTelemetryRows(loc,tightStart,tightEnd);
+  if(tightCar.length>=8)car=tightCar;if(tightLoc.length>=5)loc=tightLoc;
+  return buildTelemetrySeries(car,loc,w.exactStart);
+}
+function openF1LiveWindow(os){
+  const st=new Date(os?.date_start).getTime(),en=new Date(os?.date_end||os?.date_start).getTime();
+  return Number.isFinite(st)&&Number.isFinite(en)&&Date.now()>=st-30*60e3&&Date.now()<=en+30*60e3;
 }
 function hexRgb(h){const x=h.replace('#','');return [parseInt(x.slice(0,2),16),parseInt(x.slice(2,4),16),parseInt(x.slice(4,6),16)];}
 function mixHex(a,b,t){const A=hexRgb(a),B=hexRgb(b),v=A.map((x,i)=>Math.round(x+(B[i]-x)*t));return '#'+v.map(x=>x.toString(16).padStart(2,'0')).join('');}
@@ -729,7 +862,7 @@ async function renderTelemetry(round,key){
     available.sort((a,b)=>{const ai=resultOrder.indexOf(String(a.driver_number)),bi=resultOrder.indexOf(String(b.driver_number));return (ai<0?99:ai)-(bi<0?99:bi)||telemetryDriverName(a).localeCompare(telemetryDriverName(b));});
     const da=available[0],db=available[1]||available[0],fa=fastestLap(laps,da.driver_number),fb=fastestLap(laps,db.driver_number);
     const options=available.map(d=>`<option value="${esc(d.driver_number)}">${esc(telemetryDriverName(d))}</option>`).join('');
-    root.innerHTML=`<div class="card telemetry-controls"><div class="grid two"><label><div class="eyebrow">DRIVER A</div><select id="tel-driver-a">${options}</select></label><label><div class="eyebrow">DRIVER B</div><select id="tel-driver-b">${options}</select></label><label><div class="eyebrow">LAP A</div><select id="tel-lap-a"></select></label><label><div class="eyebrow">LAP B</div><select id="tel-lap-b"></select></label></div><div class="spacer"></div><button id="tel-load" class="external-btn red">LOAD COMPARISON</button></div><div id="telemetry-output"><div class="loader">Loading fastest laps…</div></div><div class="source-note">Post-session telemetry via OpenF1. Historical data from 2023 onwards is free. Track position is approximate, so the coloured map is for speed visualisation rather than precise racing-line analysis.</div>`;
+    root.innerHTML=`<div class="card telemetry-controls"><div class="grid two"><label><div class="eyebrow">DRIVER A</div><select id="tel-driver-a">${options}</select></label><label><div class="eyebrow">DRIVER B</div><select id="tel-driver-b">${options}</select></label><label><div class="eyebrow">LAP A</div><select id="tel-lap-a"></select></label><label><div class="eyebrow">LAP B</div><select id="tel-lap-b"></select></label></div><div class="spacer"></div><button id="tel-load" class="external-btn red">LOAD COMPARISON</button></div><div id="telemetry-output"><div class="loader">Loading fastest laps…</div></div><div class="source-note">Post-session telemetry via OpenF1. Free access becomes available once a session is historical. Track position is approximate, so the coloured map is for speed visualisation rather than precise racing-line analysis.</div>`;
     const sa=document.getElementById('tel-driver-a'),sb=document.getElementById('tel-driver-b'),la=document.getElementById('tel-lap-a'),lb=document.getElementById('tel-lap-b'),load=document.getElementById('tel-load'),output=document.getElementById('telemetry-output');
     sa.value=String(da.driver_number);sb.value=String(db.driver_number);
     const fillLaps=(sel,driver,chosen)=>{sel.innerHTML=lapSelectOptions(laps,driver,chosen);};
@@ -739,14 +872,19 @@ async function renderTelemetry(round,key){
       const na=sa.value,nb=sb.value,lpa=validTelemetryLaps(laps,na).find(x=>String(x.lap_number)===la.value),lpb=validTelemetryLaps(laps,nb).find(x=>String(x.lap_number)===lb.value);
       if(!lpa||!lpb)return;output.innerHTML='<div class="loader">Loading car and track data…</div>';load.disabled=true;
       try{
-        const [A,B]=await Promise.all([fetchLapTelemetry(os.session_key,na,lpa),fetchLapTelemetry(os.session_key,nb,lpb)]);
+        const A=await fetchLapTelemetry(os.session_key,na,lpa);const B=await fetchLapTelemetry(os.session_key,nb,lpb);
         if(!A.length||!B.length)throw new Error('telemetry');
         const nameA=(dmap[String(na)]?.name_acronym||na),nameB=(dmap[String(nb)]?.name_acronym||nb),names=[nameA,nameB],rpmMax=Math.max(10000,...A.map(x=>x.rpm),...B.map(x=>x.rpm));
         output.innerHTML=`<div class="spacer"></div><div class="grid two">${telemetrySummary(A,lpa,nameA)}${telemetrySummary(B,lpb,nameB)}</div><div class="spacer"></div>${sectorComparison(lpa,lpb,names)}<div class="spacer"></div>${telemetryLineChart('SPEED',A,B,x=>x.speed,'km/h',0,Math.max(360,...A.map(x=>x.speed),...B.map(x=>x.speed)),names)}<div class="spacer"></div>${deltaChart(A,B,names)}<div class="spacer"></div>${telemetryLineChart('THROTTLE',A,B,x=>x.throttle,'%',0,100,names)}<div class="spacer"></div>${telemetryLineChart('BRAKE',A,B,x=>x.brake,'0 / 100',0,100,names)}<div class="spacer"></div>${telemetryLineChart('GEAR',A,B,x=>x.gear,'gear',0,8,names)}<div class="spacer"></div>${telemetryLineChart('RPM',A,B,x=>x.rpm,'rpm',0,rpmMax,names)}<div class="spacer"></div>${titleBlock('SPEED MAP','Circuit-coloured Lap')}<div class="grid two"><div class="card speed-map-card">${trackSpeedMapSvg(A,`${nameA} · L${lpa.lap_number}`)}</div><div class="card speed-map-card">${trackSpeedMapSvg(B,`${nameB} · L${lpb.lap_number}`)}</div></div>`;
-      }catch{output.innerHTML='<div class="error-box">Telemetry for one of those laps could not be loaded. Try another completed lap or refresh the session.</div>';}
+      }catch(e){
+        const status=Number(e?.status||e?.message);let msg='OpenF1 returned no usable car telemetry for one of these laps. Try Reload Comparison or choose another completed lap.';
+        if(openF1LiveWindow(os))msg='This session is still inside OpenF1’s live-data window. Free telemetry becomes available about 30 minutes after the session ends.';
+        else if(status===429)msg='OpenF1 rate-limited the telemetry request. Wait a few seconds and tap Load Comparison again.';
+        output.innerHTML=`<div class="error-box">${esc(msg)}</div>`;
+      }
       finally{load.disabled=false;}
     };
-    load.onclick=run;await run();
+    load.onclick=run;await sleep(1050);await run();
   }catch{
     root.innerHTML='<div class="card"><div class="empty">Post-session telemetry is not available for this session yet. OpenF1 free historical telemetry covers sessions from 2023 onwards after publication.</div></div>';
   }
@@ -876,6 +1014,7 @@ function setupPullToRefresh(){
     if(indicator)indicator.classList.remove('show','ready');
   };
   window.addEventListener('touchstart',e=>{
+    if(e.target?.closest?.('.leaflet-container,select,input,textarea,[data-no-pull]'))return;
     if(window.scrollY<=0&&!state.refreshing&&e.touches?.length===1){
       startY=e.touches[0].clientY;pulling=true;dist=0;view.classList.add('pulling');
     }

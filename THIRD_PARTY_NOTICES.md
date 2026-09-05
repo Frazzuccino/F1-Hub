@@ -17,7 +17,11 @@ F1 Hub is an unofficial personal project and is not affiliated with Formula 1, t
 - Wikipedia / Wikimedia Commons — fallback driver profile images when an OpenF1 headshot is unavailable. Arvid Lindblad uses the CC0 Wikimedia Commons image “Arvid lindblad Budapest 2026.jpg”.
 - MasterPlay007/F1-Track-Layouts-SVG — circuit SVG assets (repository states CC0-1.0).
 - F1DB circuit assets — used for newer layouts where specified; CC BY 4.0.
-- Windy — weather-radar map/full-radar links centred on circuit coordinates.
+- RainViewer Weather Maps API — in-app historical/latest radar tiles (past two hours); RainViewer attribution is shown on the map.
+- OpenStreetMap — base map tiles and map data attribution for the in-app radar.
+- Leaflet — interactive web-map library used by the in-app radar.
+- bacinger/f1-circuits — MIT-licensed WGS84 GeoJSON circuit paths used to place the circuit outline at its real map location/orientation.
+- Windy — optional external full-radar link centred on circuit coordinates.
 
 The all-time F1 Records cards are bundled from publicly available Formula 1 career/team statistics and are current to the app release date; they are refreshed when F1 Hub itself is updated.
 

@@ -10,11 +10,19 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="F1 Hub" />
+  <script>
+    // Capture Chromium's install event as early as possible.
+    window.__f1InstallPrompt = null;
+    window.addEventListener('beforeinstallprompt', function (event) {
+      event.preventDefault();
+      window.__f1InstallPrompt = event;
+    });
+  </script>
   <title>F1 Hub</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=1.3" />
+  <link rel="stylesheet" href="styles.css?v=1.4" />
 </head>
 <body>
   <div id="app-shell">
@@ -23,7 +31,7 @@
         <span class="brand-mark">F1</span><span class="brand-word">HUB</span>
       </button>
       <div class="top-actions">
-        <button id="install-app-btn" class="install-top-btn" aria-label="Install F1 Hub">↓ APP</button>
+        <button id="install-app-btn" class="install-top-btn hidden" aria-label="Install F1 Hub">↓ APP</button>
         <span id="connection-pill" class="pill subtle">ONLINE</span>
         <button id="refresh-btn" class="icon-btn" aria-label="Refresh">↻</button>
       </div>
@@ -48,6 +56,6 @@
     <div class="install-actions"><button id="install-now" class="external-btn red">INSTALL</button><button id="install-later" class="external-btn">NOT NOW</button></div>
   </div>
   <div id="toast" class="toast" role="status"></div>
-  <script src="app.js?v=1.3"></script>
+  <script src="app.js?v=1.4"></script>
 </body>
 </html>

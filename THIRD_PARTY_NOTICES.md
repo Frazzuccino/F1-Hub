@@ -17,3 +17,7 @@ No official F1 logo or official F1 typeface is included in the app.
 - Windy — embedded weather-radar map and full-radar links centred on circuit coordinates.
 
 - Google Docs Viewer — used to display official FIA PDF steward documents in-browser without forcing a local file download.
+
+## v1.4 additions
+- Arvid Lindblad profile fallback: Wikimedia Commons, "Arvid lindblad Budapest 2026.jpg", CC0 1.0. Loaded through Wikimedia Special:FilePath.
+- FIA document readable view: the app uses Jina Reader to extract text from publicly accessible FIA PDF URLs so documents can be read inside F1 Hub without relying on Android's PDF download behaviour.

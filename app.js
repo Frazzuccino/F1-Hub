@@ -10,9 +10,9 @@ const PENALTY_SOURCE = 'https://racingnews365.com/penalty-points-f1-drivers';
 const REPRIMAND_SOURCE = 'https://timepenalty.com/guide/reprimand';
 const JINA = 'https://r.jina.ai/';
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
-const APP_VERSION = '1.3';
+const APP_VERSION = '1.4';
 const STATIC_DRIVER_PHOTOS = {
-  lindblad: 'https://upload.wikimedia.org/wikipedia/commons/e/ea/Arvid_lindblad_Budapest_2026.jpg'
+  lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
 
 const TEAM_COLOURS = {
@@ -49,7 +49,7 @@ const FALLBACK_REPRIMANDS = {'Gabriel Bortoleto':1,'Oliver Bearman':1,'Alex Albo
 
 const state = {
   route:'home', schedule:[], drivers:[], constructors:[], photos:{}, wikiPhotos:{}, news:[], penaltyPoints:{...FALLBACK_POINTS}, reprimands:{...FALLBACK_REPRIMANDS}, stewardDocs:{},
-  loaded:false, refreshing:false, installPrompt:null, countdownTimer:null, dataStamp:null
+  loaded:false, refreshing:false, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null
 };
 const view = document.getElementById('view');
 
@@ -124,6 +124,7 @@ async function loadBase(force=false){
     state.loaded=true;state.dataStamp=new Date();
   } finally { state.refreshing=false; render(); }
   refreshPenaltyData();
+  preloadRaceWinners(force);
 }
 
 async function refreshPenaltyData(){
@@ -198,11 +199,18 @@ async function loadWeatherIntoCard(r){
   const el=document.getElementById('weather-card');if(!el)return;try{const l=r.Circuit.Location;const url=`https://api.open-meteo.com/v1/forecast?latitude=${l.lat}&longitude=${l.long}&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m&timezone=${encodeURIComponent(UK_TZ)}&forecast_days=16`;const w=await fetchJSON(url,`weather-${r.Circuit.circuitId}`,30*60e3);const target=new Date(raceIso(r));const times=w.hourly?.time||[];let i=times.reduce((best,x,j)=>Math.abs(new Date(x)-target)<Math.abs(new Date(times[best]||0)-target)?j:best,0);if(!times.length||Math.abs(new Date(times[i])-target)>20*3600e3){el.innerHTML='<div class="eyebrow">RACE WEATHER</div><div class="card-title" style="margin-top:7px">Forecast not available yet</div><div class="muted" style="margin-top:5px">Weather appears when the race is inside the forecast window.</div>';return;}const temp=Math.round(w.hourly.temperature_2m?.[i]??0),rain=w.hourly.precipitation_probability?.[i]??0,wind=Math.round(w.hourly.wind_speed_10m?.[i]??0);el.innerHTML=`<div class="eyebrow">RACE WEATHER</div><div class="stat-big">${temp}°C</div><div class="muted">Rain ${rain}% · Wind ${wind} km/h</div>`;}catch{el.innerHTML='<div class="eyebrow">RACE WEATHER</div><div class="muted" style="margin-top:7px">Forecast unavailable.</div>';}
 }
 
-function renderRaces(){ view.innerHTML=titleBlock(`${YEAR} SEASON`,'Race Calendar')+`<div class="grid">${state.schedule.map(r=>`<div class="card clickable race-card" onclick="setRoute('race:${r.round}')"><div class="round-box"><small>ROUND</small><b>${esc(r.round)}</b></div><div><div class="race-name">${flag(r.Circuit.Location.country)} ${esc(r.raceName)}</div><div class="race-place">${esc(r.Circuit.circuitName)}</div></div><div class="date-chip"><div>${fmtDate(raceIso(r),{day:'numeric',month:'short'})}</div><div class="${raceStatus(r).toLowerCase()}">${raceStatus(r)}</div></div></div>`).join('')}</div>`; }
+function renderRaces(){
+  view.innerHTML=titleBlock(`${YEAR} SEASON`,'Race Calendar')+`<div class="grid">${state.schedule.map(r=>{
+    const status=raceStatus(r),w=raceWinner(r);
+    const outcome=status==='DONE'?(w?`<div class="winner-label"><small>WINNER</small><b>${esc((w.Driver?.familyName||driverCode(w.Driver)).toUpperCase())}</b></div>`:`<div class="done">RESULT</div>`):`<div class="${status.toLowerCase()}">${status}</div>`;
+    return `<div class="card clickable race-card" onclick="setRoute('race:${r.round}')"><div class="round-box"><small>ROUND</small><b>${esc(r.round)}</b></div><div><div class="race-name">${flag(r.Circuit.Location.country)} ${esc(r.raceName)}</div><div class="race-place">${esc(r.Circuit.circuitName)}</div></div><div class="date-chip"><div>${fmtDate(raceIso(r),{day:'numeric',month:'short'})}</div>${outcome}</div></div>`;
+  }).join('')}</div>`;
+  if(!state.raceHistory)preloadRaceWinners(false);
+}
 function renderStandings(){ view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Standings')+`<div class="tabs"><button class="tab active" data-stand="drivers">DRIVERS</button><button class="tab" data-stand="constructors">CONSTRUCTORS</button></div><div id="stand-list" class="card">${state.drivers.map(standingRow).join('')}</div>`;document.querySelectorAll('[data-stand]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-stand]').forEach(x=>x.classList.remove('active'));b.classList.add('active');const el=document.getElementById('stand-list');el.innerHTML=b.dataset.stand==='drivers'?state.drivers.map(standingRow).join(''):state.constructors.map(c=>`<div class="standing-row"><div class="pos">${esc(c.position)}</div><div class="driver-line"><i class="team-dot" style="background:${teamColour(c.Constructor.name)}"></i><div><div class="driver-name">${esc(c.Constructor.name)}</div><div class="driver-meta">${esc(c.wins)} wins</div></div></div><div class="points">${esc(c.points)}<small>PTS</small></div></div>`).join('');}); }
 function fmtNewsTime(d){ if(!d)return ''; const x=new Date(d),mins=Math.round((Date.now()-x)/60000);if(mins<60)return `${Math.max(1,mins)}m`;if(mins<1440)return `${Math.floor(mins/60)}h`;return fmtDate(x.toISOString()); }
 function renderNews(){ view.innerHTML=titleBlock('BBC SPORT','Latest News')+`<div class="grid news-grid">${state.news.length?state.news.map(n=>`<a class="card news-card news-link" href="${esc(n.link)}" target="_blank" rel="noopener">${n.thumbnail?`<img class="news-img" src="${esc(n.thumbnail)}" alt="" loading="lazy">`:''}<div class="news-body"><div class="news-title">${esc(n.title)}</div><div class="news-meta">BBC SPORT · ${fmtNewsTime(n.pubDate)}</div></div></a>`).join(''):'<div class="empty">News feed unavailable. Use Refresh to try again.</div>'}</div>`; }
-function renderMore(){ const installed=isAppInstalled(); const install=!installed?`<div class="spacer"></div><div class="card app-mode-card"><div><div class="eyebrow">INSTALL APP</div><div class="card-title" style="margin-top:5px">Install F1 Hub</div><div class="muted" style="margin-top:5px">Adds F1 Hub to Android with its own icon and no browser address bar.</div></div><button id="install-btn" class="external-btn red">↓ INSTALL</button></div>`:''; view.innerHTML=titleBlock('F1 HUB','Explore')+`<div class="menu-grid">
+function renderMore(){ const installed=isAppInstalled(); const canInstall=!!state.installPrompt; const install=!installed?(canInstall?`<div class="spacer"></div><div class="card app-mode-card"><div><div class="eyebrow">INSTALL APP</div><div class="card-title" style="margin-top:5px">Install F1 Hub</div><div class="muted" style="margin-top:5px">Adds F1 Hub to Android with its own icon and no browser address bar.</div></div><button id="install-btn" class="external-btn red">↓ INSTALL</button></div>`:`<div class="spacer"></div><div class="card app-mode-card"><div><div class="eyebrow">APP INSTALL</div><div class="card-title" style="margin-top:5px">Install option is preparing</div><div class="muted" style="margin-top:5px">Refresh once if this remains here. If Chrome still does not expose the install prompt, use ⋮ → Install and create shortcut → Install.</div></div></div>`):''; view.innerHTML=titleBlock('F1 HUB','Explore')+`<div class="menu-grid">
   ${menu('👤','Drivers','Profiles, photos & season stats','drivers')}${menu('🏎','Teams','Constructors & points','teams')}${menu('🗺','Circuits','Layouts & track facts','circuits')}${menu('🟨','Penalty Points','Licence points & reprimands','penalties')}
   ${menu('⚔️','Teammate Battles','Qualifying & race H2H','battles')}${menu('🚨','Stewards','Latest FIA decisions','stewards')}${menu('📊','Season Stats','Wins, podiums & DNFs','stats')}${menu('↔','Driver Compare','Compare two drivers','compare')}
   </div>${install}<div class="source-note">F1 Hub v${APP_VERSION} · Personal unofficial Formula 1 companion. Live/current data comes from free public sources and is cached locally.</div>`;
@@ -224,7 +232,30 @@ function renderRaceDetail(round){ const r=state.schedule.find(x=>x.round===round
   document.querySelectorAll('[data-racetab]').forEach(b=>b.onclick=async()=>{document.querySelectorAll('[data-racetab]').forEach(x=>x.classList.remove('active'));b.classList.add('active');const t=b.dataset.racetab;if(t==='weekend')drawWeekend();else if(t==='results')await drawResults(root,r);else if(t==='control')await drawRaceControl(root,r);else await drawRadio(root,r);});
 }
 async function drawResults(root,r){ root.innerHTML='<div class="loader">Loading classification…</div>';try{const [res,q]=await Promise.allSettled([fetchJSON(`${JOLPICA}/${YEAR}/${r.round}/results/?limit=100`,`result-${r.round}`,15*60e3),fetchJSON(`${JOLPICA}/${YEAR}/${r.round}/qualifying/?limit=100`,`quali-${r.round}`,15*60e3)]);const rr=res.status==='fulfilled'?res.value?.MRData?.RaceTable?.Races?.[0]:null,qq=q.status==='fulfilled'?q.value?.MRData?.RaceTable?.Races?.[0]:null;root.innerHTML=`${resultTable('RACE RESULT',rr?.Results||[])}<div class="spacer"></div>${resultTable('QUALIFYING',qq?.QualifyingResults||[],true)}`;}catch{root.innerHTML='<div class="error-box">Results are not available yet.</div>';}}
-function resultTable(title,rows,q=false){if(!rows.length)return `<div class="card"><div class="eyebrow">${title}</div><div class="empty">Not available yet.</div></div>`;return `<div class="card"><div class="eyebrow">${title}</div><div style="margin-top:8px">${rows.map(x=>`<div class="standing-row"><div class="pos">${esc(x.position)}</div><div class="driver-line"><i class="team-dot" style="background:${teamColour(x.Constructor?.name)}"></i><div><div class="driver-name">${esc(driverCode(x.Driver))} · ${esc(x.Driver.familyName)}</div><div class="driver-meta">${esc(x.Constructor?.name||'')}${q&&x.Q3?' · '+esc(x.Q3):''}</div></div></div><div class="points">${q?'':esc(x.points||'')}<small>${q?'':x.points?'PTS':''}</small></div></div>`).join('')}</div></div>`;}
+function raceGapLabel(x,winner){
+  if(Number(x.position)===1)return x.Time?.time||'WINNER';
+  const raw=x.Time?.time;
+  if(raw){return raw.startsWith('+')?raw:`+${raw}`;}
+  const wm=Number(winner?.Time?.millis),xm=Number(x.Time?.millis);
+  if(Number.isFinite(wm)&&Number.isFinite(xm)&&xm>=wm){
+    const d=xm-wm,mins=Math.floor(d/60000),secs=(d%60000)/1000;
+    return mins?`+${mins}:${secs.toFixed(3).padStart(6,'0')}`:`+${secs.toFixed(3)}`;
+  }
+  const st=String(x.status||'').trim();
+  if(/^\+/.test(st))return st.toUpperCase();
+  if(st==='Finished')return 'FINISHED';
+  return st||'—';
+}
+function qualiTime(x){return x.Q3||x.Q2||x.Q1||'—';}
+function resultTable(title,rows,q=false){
+  if(!rows.length)return `<div class="card"><div class="eyebrow">${title}</div><div class="empty">Not available yet.</div></div>`;
+  const winner=rows.find(x=>Number(x.position)===1)||rows[0];
+  return `<div class="card classification-card"><div class="eyebrow">${title}</div><div class="classification-head"><span>POS</span><span>DRIVER</span><span>${q?'TIME':'TIME / GAP'}</span></div><div class="classification-list">${rows.map(x=>{
+    const timing=q?qualiTime(x):raceGapLabel(x,winner);
+    const meta=q?`${x.Constructor?.name||''}`:`${x.Constructor?.name||''}${x.points?` · ${x.points} pt${Number(x.points)===1?'':'s'}`:''}`;
+    return `<div class="classification-row ${Number(x.position)===1&&!q?'winner':''}"><div class="class-pos">${esc(x.position)}</div><div class="driver-line"><i class="team-dot" style="background:${teamColour(x.Constructor?.name)}"></i><div><div class="driver-name">${esc(driverCode(x.Driver))} · ${esc(x.Driver.familyName)}</div><div class="driver-meta">${esc(meta)}</div></div></div><div class="class-time">${esc(timing)}</div></div>`;
+  }).join('')}</div></div>`;
+}
 async function openF1RaceSession(r){const country=({'USA':'United States','UK':'Great Britain','UAE':'United Arab Emirates'})[r.Circuit.Location.country]||r.Circuit.Location.country;const ss=await fetchJSON(`${OPENF1}/sessions?year=${YEAR}&country_name=${encodeURIComponent(country)}&session_name=Race`,`of1-sess-${r.round}`,6*3600e3);if(!ss?.length)return null;const target=new Date(raceIso(r));return ss.sort((a,b)=>Math.abs(new Date(a.date_start)-target)-Math.abs(new Date(b.date_start)-target))[0];}
 async function drawRaceControl(root,r){root.innerHTML='<div class="loader">Loading race control…</div>';try{const s=await openF1RaceSession(r);if(!s)throw 0;const rows=await fetchJSON(`${OPENF1}/race_control?session_key=${s.session_key}`,`rc-${r.round}`,10*60e3);if(!rows.length)throw 0;root.innerHTML=`<div class="card">${rows.slice().reverse().slice(0,120).map(x=>`<div class="steward-item"><div class="steward-kind">${esc((x.flag||x.category||'RACE CONTROL').toUpperCase())} · LAP ${esc(x.lap_number??'—')}</div><div class="steward-title">${esc(x.message||'')}</div><div class="news-meta">${x.date?fmtTime(x.date):''}</div></div>`).join('')}</div>`;}catch{root.innerHTML='<div class="card"><div class="empty">Race-control data becomes available through the free OpenF1 feed after sessions are published.</div></div>';}}
 async function drawRadio(root,r){root.innerHTML='<div class="loader">Loading team radio…</div>';try{const s=await openF1RaceSession(r);if(!s)throw 0;const rows=await fetchJSON(`${OPENF1}/team_radio?session_key=${s.session_key}`,`radio-${r.round}`,20*60e3);if(!rows.length)throw 0;root.innerHTML=`<div class="card">${rows.slice().reverse().slice(0,60).map(x=>`<div class="steward-item"><div class="steward-kind">CAR ${esc(x.driver_number)}</div><audio controls preload="none" style="width:100%;height:36px" src="${esc(x.recording_url)}"></audio><div class="news-meta">${x.date?fmtTime(x.date):''}</div></div>`).join('')}</div>`;}catch{root.innerHTML='<div class="card"><div class="empty">Team radio is unavailable for this session on the free feed.</div></div>';}}
@@ -235,6 +266,19 @@ function renderPenalties(){ const names=state.drivers.map(s=>fullName(s.Driver))
 
 async function fetchPaged(type){const cacheKey='all-'+type;const cached=cacheGet(cacheKey,60*60e3);if(cached)return cached;let offset=0,total=Infinity,parts=[];while(offset<total){const j=await fetchJSON(`${JOLPICA}/${YEAR}/${type}/?limit=100&offset=${offset}`,`${cacheKey}-${offset}`,60*60e3);const mr=j.MRData||{},rs=mr.RaceTable?.Races||[];parts.push(...rs);total=Number(mr.total||offset+100);if(!rs.length||offset+100>=total)break;offset+=100;await sleep(330);}const by={};for(const r of parts){const k=r.round;if(!by[k])by[k]={...r,Results:[],QualifyingResults:[]};by[k].Results.push(...(r.Results||[]));by[k].QualifyingResults.push(...(r.QualifyingResults||[]));}const out=Object.values(by).map(r=>({...r,Results:uniqueBy(r.Results,x=>x.Driver.driverId),QualifyingResults:uniqueBy(r.QualifyingResults,x=>x.Driver.driverId)}));return cachePut(cacheKey,out);}
 function uniqueBy(a,fn){const s=new Set();return a.filter(x=>{const k=fn(x);if(s.has(k))return false;s.add(k);return true;});}
+async function preloadRaceWinners(force=false){
+  try{
+    if(force){
+      localStorage.removeItem('f1hub:all-results');
+      for(let o=0;o<500;o+=100)localStorage.removeItem(`f1hub:all-results-${o}`);
+    }
+    const races=await fetchPaged('results');
+    state.raceHistory=races;
+    state.raceWinners=Object.fromEntries(races.map(r=>[String(r.round),(r.Results||[]).find(x=>Number(x.position)===1)]).filter(([,v])=>v));
+    if(state.route==='races')renderRaces();
+  }catch{}
+}
+function raceWinner(r){ return state.raceWinners[String(r.round)]||null; }
 async function getSeasonData(){return Promise.all([fetchPaged('results'),fetchPaged('qualifying')]);}
 function dnf(x){return x?.status && x.status!=='Finished' && !String(x.status).startsWith('+');}
 async function renderBattles(){view.innerHTML=titleBlock(`${YEAR} SEASON`,'Teammate Battles')+'<div class="loader">Calculating head-to-heads…</div>';try{const [races,quali]=await getSeasonData();const latest=[...races].sort((a,b)=>Number(b.round)-Number(a.round))[0];let teams={};(latest?.Results||[]).forEach(x=>{(teams[x.Constructor.name]??=[]).push(x.Driver.driverId)});const byId=Object.fromEntries(state.drivers.map(s=>[s.Driver.driverId,s]));const cards=[];for(const [team,ids0] of Object.entries(teams)){const ids=[...new Set(ids0)].filter(x=>byId[x]).slice(0,2);if(ids.length<2)continue;const a=battleStats(ids[0],ids[1],team,races,quali,byId),b=battleStats(ids[1],ids[0],team,races,quali,byId);cards.push(battleCard(team,a,b));}view.innerHTML=titleBlock(`${YEAR} SEASON`,'Teammate Battles')+`<div class="grid two">${cards.join('')}</div>`;}catch(e){view.innerHTML+=`<div class="error-box">Could not load the season result history.</div>`;}}
@@ -251,18 +295,39 @@ async function renderStewards(){
       if(m)items.push({title:m[1],url:m[2],kind:/summons/i.test(m[1])?'SUMMONS':/infringement/i.test(m[1])?'INFRINGEMENT':'DECISION'});
     }
     const uniq=uniqueBy(items,x=>x.url).slice(0,80); state.stewardDocs={};
-    const rows=uniq.map((x,i)=>{const id=`fia-${i}`;state.stewardDocs[id]=x;return `<button class="steward-link" onclick="setRoute('stewarddoc:${id}')"><div class="steward-item"><div class="steward-kind">${x.kind}</div><div class="steward-title">${esc(x.title)}</div><div class="news-meta">Tap to view in F1 Hub ›</div></div></button>`;}).join('');
+    const rows=uniq.map((x,i)=>{const id=`fia-${i}`;state.stewardDocs[id]=x;return `<div class="steward-link" role="button" tabindex="0" onclick="setRoute('stewarddoc:${id}')"><div class="steward-item"><div class="steward-kind">${x.kind}</div><div class="steward-title">${esc(x.title)}</div><div class="news-meta">Tap to read in F1 Hub ›</div></div></div>`;}).join('');
     view.innerHTML=titleBlock('FIA','Stewards & Decisions')+`<div class="card">${rows||'<div class="empty">No decision links could be parsed automatically.</div>'}</div><div class="spacer"></div><a class="external-btn red" href="${FIA_DOCS}" target="_blank" rel="noopener">OPEN FIA DOCUMENTS ↗</a>`;
   }catch{
     view.innerHTML=titleBlock('FIA','Stewards & Decisions')+`<div class="card"><div class="empty">The FIA page could not be read automatically. You can still open the official documents page.</div></div><div class="spacer"></div><a class="external-btn red" href="${FIA_DOCS}" target="_blank" rel="noopener">OPEN FIA DOCUMENTS ↗</a>`;
   }
 }
-function fiaViewerUrl(url){return `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(url)}`;}
-function fiaViewerFullUrl(url){return `https://docs.google.com/gview?url=${encodeURIComponent(url)}`;}
-function renderStewardDoc(id){
+function cleanFiaDocument(raw){
+  let t=String(raw||'').replace(/\r/g,'');
+  const marker=t.indexOf('Markdown Content:'); if(marker>=0)t=t.slice(marker+'Markdown Content:'.length);
+  t=t.replace(/!\[[^\]]*\]\([^)]*\)/g,'').replace(/\[([^\]]+)\]\([^)]*\)/g,'$1').replace(/^#{1,6}\s*/gm,'').replace(/\*\*/g,'').replace(/__/g,'').replace(/`/g,'');
+  const lines=t.split('\n').map(x=>x.trim()).filter(Boolean).filter(x=>!/^URL Source:/i.test(x)&&!/^Published Time:/i.test(x)&&!/^Title:/i.test(x));
+  return lines.join('\n');
+}
+function renderFiaText(text){
+  const key=/^(From|To|Document|Date|Time|No\s*\/\s*Driver|Competitor|Session|Fact|Infringement|Decision|Reason)\b/i;
+  return text.split('\n').map(line=>{
+    const m=line.match(key);
+    if(m){const label=m[0],rest=line.slice(label.length).trim();return `<div class="fia-text-row"><div class="fia-text-key">${esc(label)}</div><div>${esc(rest||'—')}</div></div>`;}
+    if(/^[A-Z0-9][A-Z0-9 '\-–—&]{8,}$/.test(line))return `<div class="fia-event-title">${esc(line)}</div>`;
+    return `<p>${esc(line)}</p>`;
+  }).join('');
+}
+async function renderStewardDoc(id){
   const d=state.stewardDocs[id]; if(!d){setRoute('stewards',false);return;}
-  const viewer=fiaViewerUrl(d.url), full=fiaViewerFullUrl(d.url);
-  view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('stewards')">← STEWARDS</button></div><div class="spacer"></div>${titleBlock(d.kind,'FIA Document')}<div class="card fia-doc-head"><div class="steward-title">${esc(d.title)}</div><div class="news-meta">Official FIA document · shown in viewer so it does not download automatically</div></div><div class="spacer"></div><div class="fia-viewer-card"><iframe class="fia-viewer" src="${esc(viewer)}" title="${esc(d.title)}" loading="eager"></iframe></div><div class="spacer"></div><div class="actions"><a class="external-btn red" href="${esc(full)}" target="_blank" rel="noopener">OPEN VIEWER FULLSCREEN ↗</a></div>`;
+  view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('stewards')">← STEWARDS</button></div><div class="spacer"></div>${titleBlock(d.kind,'FIA Document')}<div class="card fia-doc-head"><div class="steward-title">${esc(d.title)}</div><div class="news-meta">Official FIA document · opening as readable text inside F1 Hub</div></div><div class="spacer"></div><div id="fia-doc-body" class="card fia-text-card"><div class="loader">Reading FIA document…</div></div>`;
+  const root=document.getElementById('fia-doc-body');
+  try{
+    const raw=await fetchText(JINA+d.url,`fia-doc-${id}`,30*60e3),text=cleanFiaDocument(raw);
+    if(!text)throw new Error('empty');
+    root.innerHTML=renderFiaText(text)+`<div class="source-note">Text extracted from the official FIA PDF. The original document remains the authoritative source.</div>`;
+  }catch{
+    root.innerHTML=`<div class="empty">The readable text could not be loaded right now.</div><div class="actions"><a class="external-btn" href="${esc(d.url)}" target="_blank" rel="noopener">OPEN OFFICIAL FIA PDF ↗</a></div>`;
+  }
 }
 
 async function renderStats(){view.innerHTML=titleBlock(`${YEAR} SEASON`,'Season Stats')+'<div class="loader">Calculating season stats…</div>';try{const [races,quali]=await getSeasonData();const stats=state.drivers.map(s=>{let pod=0,dnfs=0,poles=0;for(const r of races){const x=(r.Results||[]).find(z=>z.Driver.driverId===s.Driver.driverId);if(x){if(Number(x.position)<=3)pod++;if(dnf(x))dnfs++;}}for(const q of quali){const x=(q.QualifyingResults||[]).find(z=>z.Driver.driverId===s.Driver.driverId);if(Number(x?.position)===1)poles++;}return {s,pod,dnfs,poles};});const leaders=(key,label)=>`<div class="card"><div class="eyebrow">${label}</div>${[...stats].sort((a,b)=>Number(b[key]??b.s[key])-Number(a[key]??a.s[key])).slice(0,5).map((x,i)=>`<div class="standing-row"><div class="pos">${i+1}</div><div class="driver-name">${esc(driverCode(x.s.Driver))} · ${esc(x.s.Driver.familyName)}</div><div class="points">${esc(x[key]??x.s[key])}</div></div>`).join('')}</div>`;view.innerHTML=titleBlock(`${YEAR} SEASON`,'Season Stats')+`<div class="grid two">${leaders('wins','MOST WINS')}${leaders('pod','MOST PODIUMS')}${leaders('poles','MOST POLES')}${leaders('dnfs','MOST DNFs')}</div>`;}catch{view.innerHTML+='<div class="error-box">Season history is unavailable.</div>';}}
@@ -273,27 +338,45 @@ function simpleDriverStats(id,races,quali,byId){let pod=0,dnfs=0,poles=0,fin=[];
 // Navigation / lifecycle
 window.setRoute=setRoute;
 state.route=decodeURIComponent(location.hash.slice(1)||'home');
-function isAppInstalled(){return isStandalone()||localStorage.getItem('f1hub-installed')==='1';}
-if(isStandalone())localStorage.setItem('f1hub-installed','1');
+function isAppInstalled(){return isStandalone()||state.justInstalled;}
 document.body.classList.toggle('standalone',isStandalone());
 function updateInstallUI(){
   const installed=isAppInstalled();
   const top=document.getElementById('install-app-btn');
-  if(top)top.classList.toggle('hidden',installed);
+  if(top)top.classList.toggle('hidden',installed||!state.installPrompt);
   if(installed)hideInstallSheet();
 }
 async function requestInstall(){
   if(isAppInstalled()){updateInstallUI();return;}
-  if(state.installPrompt){
-    const p=state.installPrompt; state.installPrompt=null;
-    p.prompt(); const choice=await p.userChoice;
-    if(choice?.outcome==='accepted'){localStorage.setItem('f1hub-installed','1');hideInstallSheet();toast('Installing F1 Hub…');}
-    updateInstallUI(); if(state.route==='more')renderMore(); return;
+  // Pick up an event captured by the early <head> listener, if present.
+  if(!state.installPrompt && window.__f1InstallPrompt) state.installPrompt=window.__f1InstallPrompt;
+  if(!state.installPrompt){
+    toast('Install prompt not ready — refresh once');
+    return;
   }
-  const copy=document.getElementById('install-sheet-copy'), now=document.getElementById('install-now'), later=document.getElementById('install-later');
-  if(copy)copy.textContent='Chrome has not exposed the one-tap install prompt yet. Tap ⋮ → Install and create shortcut → Install. Do not choose Create shortcut.';
-  if(now)now.classList.add('hidden'); if(later)later.textContent='CLOSE';
-  showInstallSheet(true);
+  const p=state.installPrompt;
+  state.installPrompt=null;
+  window.__f1InstallPrompt=null;
+  updateInstallUI();
+  try{
+    await p.prompt();
+    const choice=await p.userChoice;
+    if(choice?.outcome==='accepted'){
+      state.justInstalled=true;
+      hideInstallSheet();
+      toast('Installing F1 Hub…');
+    }
+  }catch{
+    toast('Chrome could not open the install prompt');
+  }
+  updateInstallUI();
+  if(state.route==='more')renderMore();
+}
+function installPromptReady(e){
+  if(e){ e.preventDefault(); state.installPrompt=e; window.__f1InstallPrompt=e; }
+  else if(window.__f1InstallPrompt){ state.installPrompt=window.__f1InstallPrompt; }
+  updateInstallUI();
+  if(state.route==='more')renderMore();
 }
 document.querySelectorAll('.nav-btn').forEach(b=>b.addEventListener('click',()=>setRoute(b.dataset.route)));
 document.getElementById('brand-btn').addEventListener('click',()=>setRoute('home'));
@@ -302,12 +385,13 @@ window.addEventListener('popstate',()=>{state.route=decodeURIComponent(location.
 document.getElementById('refresh-btn').addEventListener('click',async()=>{if(state.refreshing)return;toast('Refreshing…');await loadBase(true);toast('Updated');});
 window.addEventListener('online',()=>{document.getElementById('connection-pill').textContent='ONLINE';document.getElementById('connection-pill').className='pill good';});
 window.addEventListener('offline',()=>{document.getElementById('connection-pill').textContent='OFFLINE';document.getElementById('connection-pill').className='pill warn';});
-window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();state.installPrompt=e;const now=document.getElementById('install-now'),later=document.getElementById('install-later'),copy=document.getElementById('install-sheet-copy');if(now)now.classList.remove('hidden');if(later)later.textContent='NOT NOW';if(copy)copy.textContent='Install F1 Hub as a standalone app with its own icon and no browser address bar.';updateInstallUI();if(state.route==='more')renderMore();});
-window.addEventListener('appinstalled',()=>{state.installPrompt=null;localStorage.setItem('f1hub-installed','1');document.body.classList.add('standalone');hideInstallSheet();updateInstallUI();if(state.route==='more')renderMore();toast('F1 Hub installed');});
+window.addEventListener('beforeinstallprompt',installPromptReady);
+window.addEventListener('appinstalled',()=>{state.installPrompt=null;window.__f1InstallPrompt=null;state.justInstalled=true;document.body.classList.add('standalone');hideInstallSheet();updateInstallUI();if(state.route==='more')renderMore();toast('F1 Hub installed');});
 function showInstallSheet(force=false){if(isAppInstalled()||(!force&&sessionStorage.getItem('f1hub-install-dismissed')))return;const s=document.getElementById('install-sheet');if(s)s.classList.remove('hidden');}
 function hideInstallSheet(){document.getElementById('install-sheet')?.classList.add('hidden');}
 document.getElementById('install-now')?.addEventListener('click',requestInstall);
 document.getElementById('install-later')?.addEventListener('click',()=>{sessionStorage.setItem('f1hub-install-dismissed','1');hideInstallSheet();});
+installPromptReady();
 if('serviceWorker' in navigator && location.protocol!=='file:')navigator.serviceWorker.register('./service-worker.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});
 if(!navigator.onLine){document.getElementById('connection-pill').textContent='OFFLINE';document.getElementById('connection-pill').className='pill warn';}
 updateInstallUI();

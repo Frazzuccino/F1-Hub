@@ -22,7 +22,7 @@ const PENALTY_SOURCE = 'https://racingnews365.com/penalty-points-f1-drivers';
 const REPRIMAND_SOURCE = 'https://timepenalty.com/guide/reprimand';
 const JINA = 'https://r.jina.ai/';
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
-const APP_VERSION = '1.11.0';
+const APP_VERSION = '1.11.1';
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -1148,12 +1148,16 @@ function interpElapsed(series,p){
   if(!series.length)return null;let i=1;while(i<series.length&&series[i].p<p)i++;if(i>=series.length)return series.at(-1).elapsed;
   const a=series[Math.max(0,i-1)],b=series[i],span=b.p-a.p;if(span<=0)return b.elapsed;const t=(p-a.p)/span;return a.elapsed+(b.elapsed-a.elapsed)*t;
 }
-function deltaChart(a,b,names){
-  const pts=[];for(let i=0;i<=100;i++){const p=i/100,ta=interpElapsed(a,p),tb=interpElapsed(b,p);if(Number.isFinite(ta)&&Number.isFinite(tb))pts.push({p,delta:ta-tb});}
+function deltaChart(a,b,names,lapA,lapB){
+  const durA=Number(lapA?.lap_duration),durB=Number(lapB?.lap_duration),useOfficial=Number.isFinite(durA)&&durA>0&&Number.isFinite(durB)&&durB>0;
+  const pts=[];for(let i=0;i<=100;i++){const p=i/100,ta=useOfficial?normalisedElapsed(a,p,durA):interpElapsed(a,p),tb=useOfficial?normalisedElapsed(b,p,durB):interpElapsed(b,p);if(Number.isFinite(ta)&&Number.isFinite(tb))pts.push({p,delta:ta-tb});}
   if(!pts.length)return '';
-  const mx=Math.max(.05,...pts.map(x=>Math.abs(x.delta))),W=720,H=210,path=chartPath(pts,x=>x.delta,-mx,mx,W,H);
-  const zero=H/2;
-  return `<div class="card telemetry-chart delta-chart"><div class="telemetry-chart-head"><div><div class="eyebrow">LAP DELTA</div><div class="chart-unit">+ = ${esc(names[0])} slower · − = ${esc(names[0])} faster</div></div></div><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="36" y1="${zero}" x2="${W-36}" y2="${zero}" stroke="#777" stroke-dasharray="6 6"/><path d="${path}" fill="none" stroke="#ff4141" stroke-width="4" vector-effect="non-scaling-stroke"/></svg><div class="distance-axis"><span>START</span><span>0.000 s</span><span>FINISH</span></div></div>`;
+  // Anchor the comparison to the official selected-lap durations. Telemetry timestamps
+  // are only approximate and can otherwise shift the entire delta trace above/below zero.
+  if(useOfficial){const start=pts[0].delta;for(const pt of pts)pt.delta-=start;pts[0].delta=0;pts.at(-1).delta=durA-durB;}
+  const finish=pts.at(-1).delta,mx=Math.max(.05,...pts.map(x=>Math.abs(x.delta))),W=720,H=210,path=chartPath(pts,x=>x.delta,-mx,mx,W,H);
+  const zero=H/2,finishText=`${finish>0?'+':''}${finish.toFixed(3)} s`;
+  return `<div class="card telemetry-chart delta-chart"><div class="telemetry-chart-head"><div><div class="eyebrow">LAP DELTA</div><div class="chart-unit">+ = ${esc(names[0])} slower · − = ${esc(names[0])} faster</div></div></div><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="36" y1="${zero}" x2="${W-36}" y2="${zero}" stroke="#777" stroke-dasharray="6 6"/><path d="${path}" fill="none" stroke="#ff4141" stroke-width="4" vector-effect="non-scaling-stroke"/></svg><div class="distance-axis"><span>START · 0.000 s</span><span>LAP DELTA</span><span>FINISH · ${esc(finishText)}</span></div></div>`;
 }
 function interpXY(series,p){
   const pts=series.filter(x=>Number.isFinite(x.p)&&Number.isFinite(x.x)&&Number.isFinite(x.y));if(pts.length<2)return null;
@@ -1258,7 +1262,7 @@ async function renderTelemetry(round,key){
         const got=await fetchTelemetryComparisonSmart(r,s,os,[{driver:na,lap:lpa},{driver:nb,lap:lpb}],progress),[A,B]=got.series;
         if(!A.length||!B.length){const e=new Error('telemetry-empty');e.code='telemetry-empty';throw e;}
         const nameA=(dmap[String(na)]?.name_acronym||na),nameB=(dmap[String(nb)]?.name_acronym||nb),names=[nameA,nameB],rpmMax=Math.max(10000,...A.map(x=>x.rpm),...B.map(x=>x.rpm));
-        output.innerHTML=`<div class="spacer"></div><div class="grid two">${telemetrySummary(A,lpa,nameA)}${telemetrySummary(B,lpb,nameB)}</div><div class="spacer"></div>${sectorComparison(lpa,lpb,names)}<div class="spacer"></div>${titleBlock('TIME GAIN MAP','Who is faster where')}<div class="card speed-map-card delta-map-card">${trackDeltaMapSvg(A,B,names,lpa,lpb)}</div><div class="spacer"></div>${telemetryLineChart('SPEED',A,B,x=>x.speed,'km/h',0,Math.max(360,...A.map(x=>x.speed),...B.map(x=>x.speed)),names)}<div class="spacer"></div>${deltaChart(A,B,names)}<div class="spacer"></div>${telemetryLineChart('THROTTLE',A,B,x=>x.throttle,'%',0,100,names)}<div class="spacer"></div>${telemetryLineChart('BRAKE',A,B,x=>x.brake,'0 / 100',0,100,names)}<div class="spacer"></div>${telemetryLineChart('GEAR',A,B,x=>x.gear,'gear',0,8,names)}<div class="spacer"></div>${telemetryLineChart('RPM',A,B,x=>x.rpm,'rpm',0,rpmMax,names)}`;
+        output.innerHTML=`<div class="spacer"></div><div class="grid two">${telemetrySummary(A,lpa,nameA)}${telemetrySummary(B,lpb,nameB)}</div><div class="spacer"></div>${sectorComparison(lpa,lpb,names)}<div class="spacer"></div>${titleBlock('TIME GAIN MAP','Who is faster where')}<div class="card speed-map-card delta-map-card">${trackDeltaMapSvg(A,B,names,lpa,lpb)}</div><div class="spacer"></div>${telemetryLineChart('SPEED',A,B,x=>x.speed,'km/h',0,Math.max(360,...A.map(x=>x.speed),...B.map(x=>x.speed)),names)}<div class="spacer"></div>${deltaChart(A,B,names,lpa,lpb)}<div class="spacer"></div>${telemetryLineChart('THROTTLE',A,B,x=>x.throttle,'%',0,100,names)}<div class="spacer"></div>${telemetryLineChart('BRAKE',A,B,x=>x.brake,'0 / 100',0,100,names)}<div class="spacer"></div>${telemetryLineChart('GEAR',A,B,x=>x.gear,'gear',0,8,names)}<div class="spacer"></div>${telemetryLineChart('RPM',A,B,x=>x.rpm,'rpm',0,rpmMax,names)}`;
       }catch(e){
         let msg='Telemetry could not be loaded for one of these laps. Try another completed lap or try again shortly.';
         const st=Number(e?.status||e?.message);

@@ -1,4 +1,4 @@
-# F1 Hub v1.11.0 — update / install
+# F1 Hub v1.11.1 — update / install
 
 ## Update GitHub Pages
 1. Replace the files in your existing F1 Hub GitHub Pages repository with everything in this folder.
@@ -6,9 +6,11 @@
 3. Commit the change and wait for GitHub Pages to redeploy.
 
 ## Force the latest version once
-Open your F1 Hub URL once with `?v=1110` on the end. In **More**, the footer should say **F1 Hub v1.11.0**.
+Open your F1 Hub URL once with `?v=1111` on the end. In **More**, the footer should say **F1 Hub v1.11.1**.
 
-## Fixed in v1.11.0
+## Fixed in v1.11.1
+
+- Lap Delta now uses the selected drivers’ official lap durations to normalise the telemetry trace. It starts at 0.000 s and finishes at the exact Driver A minus Driver B lap-time difference, so the sign always agrees with which selected lap was faster.
 - Live Timing still refuses saved/demo timing as live, but now re-checks the validated relay every 8 seconds instead of every 15 seconds.
 - Live Timing requires the relay to prove: connected upstream, live session, not stale, recent upstream update, correct session, and (when available) the correct meeting.
 - Telemetry now uses a proper two-source chain for every season including 2026: OpenF1 historical telemetry first, then Formula 1's official `CarData.z` / `Position.z` timing archive.

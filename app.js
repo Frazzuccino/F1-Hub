@@ -19,7 +19,8 @@ const PENALTY_SOURCE = 'https://racingnews365.com/penalty-points-f1-drivers';
 const REPRIMAND_SOURCE = 'https://timepenalty.com/guide/reprimand';
 const JINA = 'https://r.jina.ai/';
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
-const APP_VERSION = '1.11.4';
+const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
+const APP_VERSION = '1.11.6';
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -84,7 +85,7 @@ const FALLBACK_REPRIMANDS = {'Gabriel Bortoleto':1,'Oliver Bearman':1,'Alex Albo
 const state = {
   route:'home', schedule:[], drivers:[], constructors:[], photos:{}, wikiPhotos:{}, news:[], newsSource:'ALL', spoilerNewsRevealedRound:null, standingsSpoilerRevealedRound:null,
   penaltyPoints:{...FALLBACK_POINTS}, reprimands:{...FALLBACK_REPRIMANDS}, stewardDocs:{}, historyYear:YEAR-1, historyCache:{}, carUpdateDocs:{},
-  loaded:false, refreshing:false, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null
+  loaded:false, refreshing:false, newsRefreshing:false, newsUpdatedAt:0, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null
 };
 const view = document.getElementById('view');
 
@@ -179,30 +180,105 @@ function radarUrl(r){ const l=r.Circuit.Location; return `https://www.windy.com/
 const CIRCUIT_GEOJSON='https://raw.githubusercontent.com/bacinger/f1-circuits/refs/heads/master/f1-circuits.geojson';
 const RAINVIEWER_API='https://api.rainviewer.com/public/weather-maps.json';
 function isStandalone(){ return window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches || window.navigator.standalone===true; }
-function wikiTitle(d){ try{ return decodeURIComponent(new URL(d?.url||'').pathname.split('/').pop()||'').replaceAll('_',' '); }catch{return '';} }
+function wikiTitle(d){ return wikiPhotoCandidates(d)[0]||''; }
+function wikiPhotoCandidates(d){
+  const id=String(d?.driverId||'').toLowerCase();
+  const mapped={
+    albon:['Alexander Albon','Alex Albon'],
+    antonelli:['Andrea Kimi Antonelli','Kimi Antonelli']
+  }[id]||[];
+  let fromUrl='';
+  try{ fromUrl=decodeURIComponent(new URL(d?.url||'').pathname.split('/').pop()||'').replaceAll('_',' '); }catch{}
+  const fromName=fullName(d);
+  return [...new Set([...mapped, fromUrl, fromName].filter(Boolean))];
+}
 async function loadWikipediaPhotos(force=false){
-  const wanted=state.drivers.map(s=>({id:s.Driver.driverId,title:wikiTitle(s.Driver)})).filter(x=>x.title); if(!wanted.length)return;
+  const wanted=state.drivers.map(s=>({id:s.Driver.driverId,titles:wikiPhotoCandidates(s.Driver)})).filter(x=>x.titles.length); if(!wanted.length)return;
   const key=`wiki-photos-${YEAR}`; if(force)localStorage.removeItem('f1hub:'+key);
-  const qs=new URLSearchParams({action:'query',format:'json',origin:'*',prop:'pageimages',piprop:'thumbnail',pithumbsize:'700',redirects:'1',titles:wanted.map(x=>x.title).join('|')});
-  try{const j=await fetchJSON(`${WIKI_API}?${qs.toString()}`,key,force?1:24*3600e3);const pages=Object.values(j?.query?.pages||{});const byTitle=Object.fromEntries(pages.filter(x=>x.thumbnail?.source).map(x=>[x.title,x.thumbnail.source]));state.wikiPhotos=Object.fromEntries(wanted.map(x=>[x.id,byTitle[x.title]]).filter(([,v])=>v));}catch{}
+  const primaryTitles=[...new Set(wanted.map(x=>x.titles[0]).filter(Boolean))];
+  const qs=new URLSearchParams({action:'query',format:'json',origin:'*',prop:'pageimages',piprop:'thumbnail',pithumbsize:'700',redirects:'1',titles:primaryTitles.join('|')});
+  try{
+    const j=await fetchJSON(`${WIKI_API}?${qs.toString()}`,key,force?1:24*3600e3);
+    const pages=Object.values(j?.query?.pages||{});
+    const byTitle=Object.fromEntries(pages.filter(x=>x.thumbnail?.source).map(x=>[x.title,x.thumbnail.source]));
+    const resolved=Object.fromEntries(wanted.map(x=>[x.id, x.titles.map(t=>byTitle[t]).find(Boolean)]).filter(([,v])=>v));
+    const missing=wanted.filter(x=>!resolved[x.id]);
+    for(const item of missing){
+      for(const title of item.titles){
+        try{
+          const keyPart=encodeURIComponent(title.replaceAll(' ','_'));
+          const summary=await fetchJSON(`${WIKI_REST}${keyPart}`, `wiki-summary-${YEAR}-${item.id}-${keyPart}`, force?1:7*24*3600e3, 12000);
+          const thumb=summary?.thumbnail?.source || summary?.originalimage?.source;
+          if(thumb){ resolved[item.id]=thumb; break; }
+        }catch{}
+      }
+    }
+    state.wikiPhotos=resolved;
+  }catch{}
 }
 function driverPhotoUrls(s){ const d=s?.Driver||s; const of=state.photos[driverCode(d)]?.headshot_url; const wiki=state.wikiPhotos[d?.driverId]; const special=/lindblad/i.test(`${d?.driverId||''} ${d?.givenName||''} ${d?.familyName||''}`)?STATIC_DRIVER_PHOTOS.lindblad:null; return [...new Set([special,of,wiki].filter(Boolean))]; }
 function driverPhotoError(img){ const fb=img.dataset.fallback; if(fb){img.dataset.fallback='';img.src=fb;return;} const holder=img.closest('.driver-photo-holder, .profile-photo-holder'); if(holder){holder.innerHTML=`<div class="avatar ${holder.classList.contains('profile-photo-holder')?'profile-avatar':''}">${esc(img.dataset.code||'---')}</div>`;} else {img.style.display='none';} }
 window.driverPhotoError=driverPhotoError;
 
-async function loadNewsSources(force=false){
-  if(force)NEWS_SOURCES.forEach(src=>localStorage.removeItem('f1hub:news-'+src.id));
-  const items=[];
-  for(const src of NEWS_SOURCES){
-    try{
-      const j=await fetchJSON(RSS2JSON+encodeURIComponent(src.feed),'news-'+src.id,force?1:10*60e3);
-      if(j?.status==='ok')for(const n of (j.items||[]).slice(0,18))items.push({...n,source:src.name,sourceId:src.id});
-    }catch{}
-    await sleep(90);
+function rssCacheBust(url){
+  try{const u=new URL(url);u.searchParams.set('_f1hub',String(Date.now()));return u.toString();}catch{return url;}
+}
+async function fetchNewsText(url,force=false,timeoutMs=14000){
+  const target=force?rssCacheBust(url):url;
+  const c=new AbortController();const timer=setTimeout(()=>c.abort(),timeoutMs);
+  try{
+    const r=await fetch(target,{signal:c.signal,cache:'no-store'});
+    if(!r.ok)throw new Error(`${r.status}`);
+    return await r.text();
+  } finally { clearTimeout(timer); }
+}
+function xmlNodeText(node,names){
+  for(const name of names){const el=node.getElementsByTagName(name)?.[0];const v=el?.textContent?.trim();if(v)return v;}return '';
+}
+function rssImage(node,description=''){
+  for(const name of ['media:content','media:thumbnail','enclosure']){
+    const els=[...(node.getElementsByTagName(name)||[])];
+    for(const el of els){const u=el.getAttribute?.('url');const type=el.getAttribute?.('type')||'';if(u&&(name!=='enclosure'||!type||type.startsWith('image/')))return u;}
   }
+  const m=String(description||'').match(/<img[^>]+src=["']([^"']+)["']/i);return m?.[1]||'';
+}
+function parseRSS(xml,src){
+  const doc=new DOMParser().parseFromString(String(xml||''),'application/xml');
+  if(doc.querySelector('parsererror'))return [];
+  const nodes=[...doc.getElementsByTagName('item'),...doc.getElementsByTagName('entry')];
+  return nodes.slice(0,24).map(node=>{
+    const title=xmlNodeText(node,['title']);
+    let link='';
+    for(const el of [...(node.getElementsByTagName('link')||[])]){link=el.getAttribute?.('href')||el.textContent?.trim()||'';if(link)break;}
+    const pubDate=xmlNodeText(node,['pubDate','published','updated','dc:date']);
+    const description=xmlNodeText(node,['description','summary','content','content:encoded']);
+    return {title,link,pubDate,thumbnail:rssImage(node,description),description,source:src.name,sourceId:src.id};
+  }).filter(x=>x.title&&x.link);
+}
+async function fetchRSSItems(src,force=false){
+  // Prefer the publisher feed itself so the app is not dependent on rss2json's cache.
+  try{const xml=await fetchNewsText(src.feed,force);const rows=parseRSS(xml,src);if(rows.length)return rows;}catch{}
+  // Most publisher feeds do not expose browser CORS headers. Read the same public XML through AllOrigins.
+  try{const raw=`https://api.allorigins.win/raw?url=${encodeURIComponent(force?rssCacheBust(src.feed):src.feed)}${force?`&cb=${Date.now()}`:''}`;const xml=await fetchNewsText(raw,false);const rows=parseRSS(xml,src);if(rows.length)return rows;}catch{}
+  // Legacy fallback only. This can be stale, so never make it the preferred route.
+  try{const j=await fetchJSON(RSS2JSON+encodeURIComponent(src.feed),`news-rss2json-${src.id}`,force?1:10*60e3);if(j?.status==='ok')return (j.items||[]).slice(0,18).map(n=>({...n,source:src.name,sourceId:src.id}));}catch{}
+  return [];
+}
+async function loadNewsSources(force=false){
+  if(force)NEWS_SOURCES.forEach(src=>{localStorage.removeItem('f1hub:news-'+src.id);localStorage.removeItem('f1hub:news-rss2json-'+src.id);});
+  const settled=await Promise.allSettled(NEWS_SOURCES.map(src=>fetchRSSItems(src,force)));
+  const items=settled.flatMap(x=>x.status==='fulfilled'?x.value:[]);
   const seen=new Set();
-  state.news=items.sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0)).filter(n=>{const k=(n.link||n.title||'').replace(/\?.*$/,'').toLowerCase();if(!k||seen.has(k))return false;seen.add(k);return true;}).slice(0,80);
+  const fresh=items.sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0)).filter(n=>{const k=(n.link||n.title||'').replace(/\?.*$/,'').toLowerCase();if(!k||seen.has(k))return false;seen.add(k);return true;}).slice(0,80);
+  // Keep old stories only when every live source is unreachable; never overwrite fresh data with stale fallback data.
+  if(fresh.length){state.news=fresh;cachePut('news-combined',fresh);state.newsUpdatedAt=Date.now();}
+  else {const old=cacheGet('news-combined');if(old?.length)state.news=old;}
   return state.news;
+}
+async function refreshNewsOnly(force=false){
+  if(state.newsRefreshing)return;
+  state.newsRefreshing=true;
+  try{await loadNewsSources(force);if(state.route==='news')renderNews();}finally{state.newsRefreshing=false;}
 }
 
 async function loadBase(force=false){
@@ -1376,4 +1452,13 @@ if('serviceWorker' in navigator && location.protocol!=='file:')navigator.service
 if(!navigator.onLine){document.getElementById('connection-pill').textContent='OFFLINE';document.getElementById('connection-pill').className='pill warn';}
 updateInstallUI();
 setupPullToRefresh();
+// Android PWAs are often resumed from memory rather than reloaded. Refresh news when the app becomes visible again.
+let newsBackgroundedAt=Date.now();
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){newsBackgroundedAt=Date.now();return;}
+  const age=Date.now()-(state.newsUpdatedAt||0);
+  if(age>3*60e3||Date.now()-newsBackgroundedAt>3*60e3)refreshNewsOnly(true);
+});
+window.addEventListener('pageshow',()=>{if(state.loaded&&Date.now()-(state.newsUpdatedAt||0)>3*60e3)refreshNewsOnly(true);});
+setInterval(()=>{if(!document.hidden&&state.loaded&&Date.now()-(state.newsUpdatedAt||0)>10*60e3)refreshNewsOnly(true);},60e3);
 loadBase();

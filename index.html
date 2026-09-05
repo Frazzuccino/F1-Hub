@@ -12,9 +12,9 @@
   <meta name="apple-mobile-web-app-title" content="F1 Hub" />
   <title>F1 Hub</title>
   <link rel="manifest" href="manifest.json" />
-  <link rel="icon" href="icons/icon-192.png" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=1.2" />
+  <link rel="icon" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="stylesheet" href="styles.css?v=1.3" />
 </head>
 <body>
   <div id="app-shell">
@@ -23,6 +23,7 @@
         <span class="brand-mark">F1</span><span class="brand-word">HUB</span>
       </button>
       <div class="top-actions">
+        <button id="install-app-btn" class="install-top-btn" aria-label="Install F1 Hub">↓ APP</button>
         <span id="connection-pill" class="pill subtle">ONLINE</span>
         <button id="refresh-btn" class="icon-btn" aria-label="Refresh">↻</button>
       </div>
@@ -43,10 +44,10 @@
     <div class="install-grabber"></div>
     <div class="eyebrow">APP MODE</div>
     <div class="install-title">Install F1 Hub</div>
-    <div class="muted">Install F1 Hub as a standalone app with its own icon and no browser address bar.</div>
+    <div id="install-sheet-copy" class="muted">Install F1 Hub as a standalone app with its own icon and no browser address bar.</div>
     <div class="install-actions"><button id="install-now" class="external-btn red">INSTALL</button><button id="install-later" class="external-btn">NOT NOW</button></div>
   </div>
   <div id="toast" class="toast" role="status"></div>
-  <script src="app.js?v=1.2"></script>
+  <script src="app.js?v=1.3"></script>
 </body>
 </html>

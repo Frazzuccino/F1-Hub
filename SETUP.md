@@ -1,33 +1,14 @@
-# F1 Hub v1.2 — Android install
+# F1 Hub v1.3 — update / install
 
-This version uses the same install structure as the Engineering Toolbox.
+## Update GitHub Pages
+1. Replace the files in your existing F1 Hub GitHub Pages repository with everything in this folder.
+2. Keep these files at the repository root: `index.html`, `app.js`, `styles.css`, `manifest.json`, `service-worker.js`, `icon.svg`, `icon-192.png`, `icon-512.png`, `.nojekyll`.
+3. Commit the change and wait for GitHub Pages to redeploy.
 
-## Update your existing GitHub Pages site
+## Force the latest version once
+Open your F1 Hub URL with `?v=130` on the end. In More, the footer should say **F1 Hub v1.3**. If it still shows an older version, clear the site data for the GitHub Pages site in Chrome and reopen it.
 
-1. Open the GitHub repository currently hosting F1 Hub.
-2. Delete the old `manifest.webmanifest` and `sw.js` files if they are still there.
-3. Upload/replace all files from this v1.2 folder, including:
-   - `index.html`
-   - `app.js`
-   - `styles.css`
-   - `manifest.json`
-   - `service-worker.js`
-   - `.nojekyll`
-   - the complete `icons` folder
-4. Commit the changes.
-5. Wait for GitHub Pages to finish deploying.
+## Install
+When F1 Hub is open in Chrome, use the red **↓ APP** button in the top bar (or the Install button in More). Once installed, the install button is hidden and F1 Hub opens standalone without the Chrome address bar.
 
-## Install on Android
-
-For the closest match to how Engineering Toolbox was installed, open the F1 Hub GitHub Pages address in the same Android browser you used for Engineering Toolbox.
-
-1. Open the F1 Hub site.
-2. Refresh once after the v1.2 deployment.
-3. Open the browser menu.
-4. Choose **Install app**, or **Add to Home screen → Install** (wording varies by browser).
-5. Accept the Android installation prompt.
-6. Launch **F1 Hub** from the new icon in your app drawer/home screen.
-
-When launched from that icon it runs with `display: standalone`, so the normal browser address bar and controls are removed.
-
-If Android still only offers a basic shortcut, clear the old F1 Hub site data/cache once, reopen the site, and retry the install after confirming v1.2 is displayed at the bottom of More.
+If Chrome has not yet exposed its one-tap install prompt, the app will show the fallback instruction: Chrome menu → Install and create shortcut → **Install**. Do not choose Create shortcut.

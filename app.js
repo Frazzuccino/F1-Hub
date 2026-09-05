@@ -10,7 +10,10 @@ const PENALTY_SOURCE = 'https://racingnews365.com/penalty-points-f1-drivers';
 const REPRIMAND_SOURCE = 'https://timepenalty.com/guide/reprimand';
 const JINA = 'https://r.jina.ai/';
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
-const APP_VERSION = '1.1';
+const APP_VERSION = '1.3';
+const STATIC_DRIVER_PHOTOS = {
+  lindblad: 'https://upload.wikimedia.org/wikipedia/commons/e/ea/Arvid_lindblad_Budapest_2026.jpg'
+};
 
 const TEAM_COLOURS = {
   'McLaren':'#ff8700','Mercedes':'#00d2be','Ferrari':'#e8002d','Red Bull':'#3671c6','Red Bull Racing':'#3671c6',
@@ -45,7 +48,7 @@ const FALLBACK_POINTS = {
 const FALLBACK_REPRIMANDS = {'Gabriel Bortoleto':1,'Oliver Bearman':1,'Alex Albon':2,'Nico Hulkenberg':1,'Carlos Sainz':1,'Lewis Hamilton':1,'Kimi Antonelli':1,'Sergio Perez':2,'Liam Lawson':1,'George Russell':1};
 
 const state = {
-  route:'home', schedule:[], drivers:[], constructors:[], photos:{}, wikiPhotos:{}, news:[], penaltyPoints:{...FALLBACK_POINTS}, reprimands:{...FALLBACK_REPRIMANDS},
+  route:'home', schedule:[], drivers:[], constructors:[], photos:{}, wikiPhotos:{}, news:[], penaltyPoints:{...FALLBACK_POINTS}, reprimands:{...FALLBACK_REPRIMANDS}, stewardDocs:{},
   loaded:false, refreshing:false, installPrompt:null, countdownTimer:null, dataStamp:null
 };
 const view = document.getElementById('view');
@@ -98,7 +101,7 @@ async function loadWikipediaPhotos(force=false){
   const qs=new URLSearchParams({action:'query',format:'json',origin:'*',prop:'pageimages',piprop:'thumbnail',pithumbsize:'700',redirects:'1',titles:wanted.map(x=>x.title).join('|')});
   try{const j=await fetchJSON(`${WIKI_API}?${qs.toString()}`,key,force?1:24*3600e3);const pages=Object.values(j?.query?.pages||{});const byTitle=Object.fromEntries(pages.filter(x=>x.thumbnail?.source).map(x=>[x.title,x.thumbnail.source]));state.wikiPhotos=Object.fromEntries(wanted.map(x=>[x.id,byTitle[x.title]]).filter(([,v])=>v));}catch{}
 }
-function driverPhotoUrls(s){ const d=s?.Driver||s; const of=state.photos[driverCode(d)]?.headshot_url; const wiki=state.wikiPhotos[d?.driverId]; return [...new Set([of,wiki].filter(Boolean))]; }
+function driverPhotoUrls(s){ const d=s?.Driver||s; const of=state.photos[driverCode(d)]?.headshot_url; const wiki=state.wikiPhotos[d?.driverId]; const special=/lindblad/i.test(`${d?.driverId||''} ${d?.givenName||''} ${d?.familyName||''}`)?STATIC_DRIVER_PHOTOS.lindblad:null; return [...new Set([special,of,wiki].filter(Boolean))]; }
 function driverPhotoError(img){ const fb=img.dataset.fallback; if(fb){img.dataset.fallback='';img.src=fb;return;} const holder=img.closest('.driver-photo-holder, .profile-photo-holder'); if(holder){holder.innerHTML=`<div class="avatar ${holder.classList.contains('profile-photo-holder')?'profile-avatar':''}">${esc(img.dataset.code||'---')}</div>`;} else {img.style.display='none';} }
 window.driverPhotoError=driverPhotoError;
 
@@ -161,7 +164,7 @@ function render(){
   if(!state.loaded){view.innerHTML='<div class="loader">Loading F1 Hub…</div>';return;}
   const r=state.route;
   if(r==='home')return renderHome(); if(r==='races')return renderRaces(); if(r==='standings')return renderStandings(); if(r==='news')return renderNews(); if(r==='more')return renderMore();
-  if(r.startsWith('race:'))return renderRaceDetail(r.split(':')[1]); if(r.startsWith('driver:'))return renderDriver(r.slice(7)); if(r.startsWith('circuit:'))return renderCircuit(r.split(':')[1]); if(r.startsWith('radar:'))return renderRadar(r.split(':')[1]);
+  if(r.startsWith('race:'))return renderRaceDetail(r.split(':')[1]); if(r.startsWith('driver:'))return renderDriver(r.slice(7)); if(r.startsWith('circuit:'))return renderCircuit(r.split(':')[1]); if(r.startsWith('radar:'))return renderRadar(r.split(':')[1]); if(r.startsWith('stewarddoc:'))return renderStewardDoc(r.slice(11));
   if(r==='drivers')return renderDrivers(); if(r==='teams')return renderTeams(); if(r==='circuits')return renderCircuits(); if(r==='penalties')return renderPenalties(); if(r==='battles')return renderBattles(); if(r==='stewards')return renderStewards(); if(r==='stats')return renderStats(); if(r==='compare')return renderCompare();
   renderHome();
 }
@@ -199,11 +202,11 @@ function renderRaces(){ view.innerHTML=titleBlock(`${YEAR} SEASON`,'Race Calenda
 function renderStandings(){ view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Standings')+`<div class="tabs"><button class="tab active" data-stand="drivers">DRIVERS</button><button class="tab" data-stand="constructors">CONSTRUCTORS</button></div><div id="stand-list" class="card">${state.drivers.map(standingRow).join('')}</div>`;document.querySelectorAll('[data-stand]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-stand]').forEach(x=>x.classList.remove('active'));b.classList.add('active');const el=document.getElementById('stand-list');el.innerHTML=b.dataset.stand==='drivers'?state.drivers.map(standingRow).join(''):state.constructors.map(c=>`<div class="standing-row"><div class="pos">${esc(c.position)}</div><div class="driver-line"><i class="team-dot" style="background:${teamColour(c.Constructor.name)}"></i><div><div class="driver-name">${esc(c.Constructor.name)}</div><div class="driver-meta">${esc(c.wins)} wins</div></div></div><div class="points">${esc(c.points)}<small>PTS</small></div></div>`).join('');}); }
 function fmtNewsTime(d){ if(!d)return ''; const x=new Date(d),mins=Math.round((Date.now()-x)/60000);if(mins<60)return `${Math.max(1,mins)}m`;if(mins<1440)return `${Math.floor(mins/60)}h`;return fmtDate(x.toISOString()); }
 function renderNews(){ view.innerHTML=titleBlock('BBC SPORT','Latest News')+`<div class="grid news-grid">${state.news.length?state.news.map(n=>`<a class="card news-card news-link" href="${esc(n.link)}" target="_blank" rel="noopener">${n.thumbnail?`<img class="news-img" src="${esc(n.thumbnail)}" alt="" loading="lazy">`:''}<div class="news-body"><div class="news-title">${esc(n.title)}</div><div class="news-meta">BBC SPORT · ${fmtNewsTime(n.pubDate)}</div></div></a>`).join(''):'<div class="empty">News feed unavailable. Use Refresh to try again.</div>'}</div>`; }
-function renderMore(){ const installed=isStandalone(); const install=!installed?`<div class="spacer"></div><div class="card app-mode-card"><div><div class="eyebrow">INSTALL APP</div><div class="card-title" style="margin-top:5px">${state.installPrompt?'Install F1 Hub':'Install from your browser menu'}</div><div class="muted" style="margin-top:5px">${state.installPrompt?'Installs F1 Hub as a standalone app.':'Choose Install app, or Add to Home screen → Install. Once installed it opens without the browser address bar.'}</div></div>${state.installPrompt?'<button id="install-btn" class="external-btn red">INSTALL</button>':''}</div>`:''; view.innerHTML=titleBlock('F1 HUB','Explore')+`<div class="menu-grid">
+function renderMore(){ const installed=isAppInstalled(); const install=!installed?`<div class="spacer"></div><div class="card app-mode-card"><div><div class="eyebrow">INSTALL APP</div><div class="card-title" style="margin-top:5px">Install F1 Hub</div><div class="muted" style="margin-top:5px">Adds F1 Hub to Android with its own icon and no browser address bar.</div></div><button id="install-btn" class="external-btn red">↓ INSTALL</button></div>`:''; view.innerHTML=titleBlock('F1 HUB','Explore')+`<div class="menu-grid">
   ${menu('👤','Drivers','Profiles, photos & season stats','drivers')}${menu('🏎','Teams','Constructors & points','teams')}${menu('🗺','Circuits','Layouts & track facts','circuits')}${menu('🟨','Penalty Points','Licence points & reprimands','penalties')}
   ${menu('⚔️','Teammate Battles','Qualifying & race H2H','battles')}${menu('🚨','Stewards','Latest FIA decisions','stewards')}${menu('📊','Season Stats','Wins, podiums & DNFs','stats')}${menu('↔','Driver Compare','Compare two drivers','compare')}
   </div>${install}<div class="source-note">F1 Hub v${APP_VERSION} · Personal unofficial Formula 1 companion. Live/current data comes from free public sources and is cached locally.</div>`;
-  document.getElementById('install-btn')?.addEventListener('click',async()=>{state.installPrompt.prompt();await state.installPrompt.userChoice;state.installPrompt=null;renderMore();});
+  document.getElementById('install-btn')?.addEventListener('click',requestInstall);
 }
 function menu(icon,title,sub,route){return `<div class="menu-card" onclick="setRoute('${route}')"><div class="icon">${icon}</div><b>${esc(title)}</b><small>${esc(sub)}</small></div>`;}
 
@@ -238,7 +241,29 @@ async function renderBattles(){view.innerHTML=titleBlock(`${YEAR} SEASON`,'Teamm
 function battleStats(id,mate,team,races,quali,byId){let podiums=0,dnfs=0,rh=0,qh=0,starts=[],fin=[];for(const r of races){const me=(r.Results||[]).find(x=>x.Driver.driverId===id&&x.Constructor.name===team),m=(r.Results||[]).find(x=>x.Driver.driverId===mate&&x.Constructor.name===team);if(me){const p=Number(me.position);if(p){fin.push(p);if(p<=3)podiums++;}const g=Number(me.grid);if(Number.isFinite(g))starts.push(g);if(dnf(me))dnfs++;}if(me&&m&&Number(me.position)<Number(m.position))rh++;}for(const q of quali){const me=(q.QualifyingResults||[]).find(x=>x.Driver.driverId===id&&x.Constructor.name===team),m=(q.QualifyingResults||[]).find(x=>x.Driver.driverId===mate&&x.Constructor.name===team);if(me&&m&&Number(me.position)<Number(m.position))qh++;}const s=byId[id];return {code:driverCode(s.Driver),points:s.points,wins:s.wins,podiums,dnfs,rh,qh,avgS:starts.length?(starts.reduce((a,b)=>a+b)/starts.length).toFixed(1):'—',avgF:fin.length?(fin.reduce((a,b)=>a+b)/fin.length).toFixed(1):'—'};}
 function battleCard(team,a,b){const row=(label,x,y)=>`<div class="battle-stat"><b>${esc(x)}</b><div class="mid">${label}</div><b>${esc(y)}</b></div>`;return `<div class="card battle-card" style="border-top:4px solid ${teamColour(team)}"><div class="battle-team">${esc(team.toUpperCase())}</div><div class="battle-head"><div class="battle-driver">${esc(a.code)}</div><div class="battle-vs">VS</div><div class="battle-driver">${esc(b.code)}</div></div>${row('POINTS',a.points,b.points)}${row('WINS',a.wins,b.wins)}${row('PODIUMS',a.podiums,b.podiums)}${row('QUALI H2H',a.qh,b.qh)}${row('RACE H2H',a.rh,b.rh)}${row('AVG START',a.avgS,b.avgS)}${row('AVG FINISH',a.avgF,b.avgF)}${row('DNFs',a.dnfs,b.dnfs)}</div>`;}
 
-async function renderStewards(){view.innerHTML=titleBlock('FIA','Stewards & Decisions')+'<div class="loader">Checking FIA documents…</div>';try{const text=await fetchText(JINA+FIA_DOCS,'fia-docs',20*60e3);const items=[];for(const line of text.split('\n')){if(!/(Decision|Infringement|Summons)/i.test(line))continue;const m=line.match(/\[([^\]]*(?:Decision|Infringement|Summons)[^\]]*)\]\((https?:\/\/[^)]+)\)/i);if(m)items.push({title:m[1],url:m[2],kind:/summons/i.test(m[1])?'SUMMONS':/infringement/i.test(m[1])?'INFRINGEMENT':'DECISION'});}const uniq=uniqueBy(items,x=>x.url).slice(0,80);view.innerHTML=titleBlock('FIA','Stewards & Decisions')+`<div class="card">${uniq.length?uniq.map(x=>`<a class="news-link" href="${esc(x.url)}" target="_blank" rel="noopener"><div class="steward-item"><div class="steward-kind">${x.kind}</div><div class="steward-title">${esc(x.title)}</div></div></a>`).join(''):'<div class="empty">No decision links could be parsed automatically.</div>'}</div><div class="spacer"></div><a class="external-btn red" href="${FIA_DOCS}" target="_blank" rel="noopener">OPEN FIA DOCUMENTS ↗</a>`;}catch{view.innerHTML=titleBlock('FIA','Stewards & Decisions')+`<div class="card"><div class="empty">The FIA page could not be read automatically. You can still open the official documents page.</div></div><div class="spacer"></div><a class="external-btn red" href="${FIA_DOCS}" target="_blank" rel="noopener">OPEN FIA DOCUMENTS ↗</a>`;}}
+async function renderStewards(){
+  view.innerHTML=titleBlock('FIA','Stewards & Decisions')+'<div class="loader">Checking FIA documents…</div>';
+  try{
+    const text=await fetchText(JINA+FIA_DOCS,'fia-docs',20*60e3), items=[];
+    for(const line of text.split('\n')){
+      if(!/(Decision|Infringement|Summons)/i.test(line))continue;
+      const m=line.match(/\[([^\]]*(?:Decision|Infringement|Summons)[^\]]*)\]\((https?:\/\/[^)]+)\)/i);
+      if(m)items.push({title:m[1],url:m[2],kind:/summons/i.test(m[1])?'SUMMONS':/infringement/i.test(m[1])?'INFRINGEMENT':'DECISION'});
+    }
+    const uniq=uniqueBy(items,x=>x.url).slice(0,80); state.stewardDocs={};
+    const rows=uniq.map((x,i)=>{const id=`fia-${i}`;state.stewardDocs[id]=x;return `<button class="steward-link" onclick="setRoute('stewarddoc:${id}')"><div class="steward-item"><div class="steward-kind">${x.kind}</div><div class="steward-title">${esc(x.title)}</div><div class="news-meta">Tap to view in F1 Hub ›</div></div></button>`;}).join('');
+    view.innerHTML=titleBlock('FIA','Stewards & Decisions')+`<div class="card">${rows||'<div class="empty">No decision links could be parsed automatically.</div>'}</div><div class="spacer"></div><a class="external-btn red" href="${FIA_DOCS}" target="_blank" rel="noopener">OPEN FIA DOCUMENTS ↗</a>`;
+  }catch{
+    view.innerHTML=titleBlock('FIA','Stewards & Decisions')+`<div class="card"><div class="empty">The FIA page could not be read automatically. You can still open the official documents page.</div></div><div class="spacer"></div><a class="external-btn red" href="${FIA_DOCS}" target="_blank" rel="noopener">OPEN FIA DOCUMENTS ↗</a>`;
+  }
+}
+function fiaViewerUrl(url){return `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(url)}`;}
+function fiaViewerFullUrl(url){return `https://docs.google.com/gview?url=${encodeURIComponent(url)}`;}
+function renderStewardDoc(id){
+  const d=state.stewardDocs[id]; if(!d){setRoute('stewards',false);return;}
+  const viewer=fiaViewerUrl(d.url), full=fiaViewerFullUrl(d.url);
+  view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('stewards')">← STEWARDS</button></div><div class="spacer"></div>${titleBlock(d.kind,'FIA Document')}<div class="card fia-doc-head"><div class="steward-title">${esc(d.title)}</div><div class="news-meta">Official FIA document · shown in viewer so it does not download automatically</div></div><div class="spacer"></div><div class="fia-viewer-card"><iframe class="fia-viewer" src="${esc(viewer)}" title="${esc(d.title)}" loading="eager"></iframe></div><div class="spacer"></div><div class="actions"><a class="external-btn red" href="${esc(full)}" target="_blank" rel="noopener">OPEN VIEWER FULLSCREEN ↗</a></div>`;
+}
 
 async function renderStats(){view.innerHTML=titleBlock(`${YEAR} SEASON`,'Season Stats')+'<div class="loader">Calculating season stats…</div>';try{const [races,quali]=await getSeasonData();const stats=state.drivers.map(s=>{let pod=0,dnfs=0,poles=0;for(const r of races){const x=(r.Results||[]).find(z=>z.Driver.driverId===s.Driver.driverId);if(x){if(Number(x.position)<=3)pod++;if(dnf(x))dnfs++;}}for(const q of quali){const x=(q.QualifyingResults||[]).find(z=>z.Driver.driverId===s.Driver.driverId);if(Number(x?.position)===1)poles++;}return {s,pod,dnfs,poles};});const leaders=(key,label)=>`<div class="card"><div class="eyebrow">${label}</div>${[...stats].sort((a,b)=>Number(b[key]??b.s[key])-Number(a[key]??a.s[key])).slice(0,5).map((x,i)=>`<div class="standing-row"><div class="pos">${i+1}</div><div class="driver-name">${esc(driverCode(x.s.Driver))} · ${esc(x.s.Driver.familyName)}</div><div class="points">${esc(x[key]??x.s[key])}</div></div>`).join('')}</div>`;view.innerHTML=titleBlock(`${YEAR} SEASON`,'Season Stats')+`<div class="grid two">${leaders('wins','MOST WINS')}${leaders('pod','MOST PODIUMS')}${leaders('poles','MOST POLES')}${leaders('dnfs','MOST DNFs')}</div>`;}catch{view.innerHTML+='<div class="error-box">Season history is unavailable.</div>';}}
 
@@ -248,19 +273,42 @@ function simpleDriverStats(id,races,quali,byId){let pod=0,dnfs=0,poles=0,fin=[];
 // Navigation / lifecycle
 window.setRoute=setRoute;
 state.route=decodeURIComponent(location.hash.slice(1)||'home');
+function isAppInstalled(){return isStandalone()||localStorage.getItem('f1hub-installed')==='1';}
+if(isStandalone())localStorage.setItem('f1hub-installed','1');
 document.body.classList.toggle('standalone',isStandalone());
+function updateInstallUI(){
+  const installed=isAppInstalled();
+  const top=document.getElementById('install-app-btn');
+  if(top)top.classList.toggle('hidden',installed);
+  if(installed)hideInstallSheet();
+}
+async function requestInstall(){
+  if(isAppInstalled()){updateInstallUI();return;}
+  if(state.installPrompt){
+    const p=state.installPrompt; state.installPrompt=null;
+    p.prompt(); const choice=await p.userChoice;
+    if(choice?.outcome==='accepted'){localStorage.setItem('f1hub-installed','1');hideInstallSheet();toast('Installing F1 Hub…');}
+    updateInstallUI(); if(state.route==='more')renderMore(); return;
+  }
+  const copy=document.getElementById('install-sheet-copy'), now=document.getElementById('install-now'), later=document.getElementById('install-later');
+  if(copy)copy.textContent='Chrome has not exposed the one-tap install prompt yet. Tap ⋮ → Install and create shortcut → Install. Do not choose Create shortcut.';
+  if(now)now.classList.add('hidden'); if(later)later.textContent='CLOSE';
+  showInstallSheet(true);
+}
 document.querySelectorAll('.nav-btn').forEach(b=>b.addEventListener('click',()=>setRoute(b.dataset.route)));
 document.getElementById('brand-btn').addEventListener('click',()=>setRoute('home'));
+document.getElementById('install-app-btn')?.addEventListener('click',requestInstall);
 window.addEventListener('popstate',()=>{state.route=decodeURIComponent(location.hash.slice(1)||'home');document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',parentNav(state.route)===b.dataset.route));render();});
 document.getElementById('refresh-btn').addEventListener('click',async()=>{if(state.refreshing)return;toast('Refreshing…');await loadBase(true);toast('Updated');});
 window.addEventListener('online',()=>{document.getElementById('connection-pill').textContent='ONLINE';document.getElementById('connection-pill').className='pill good';});
 window.addEventListener('offline',()=>{document.getElementById('connection-pill').textContent='OFFLINE';document.getElementById('connection-pill').className='pill warn';});
-window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();state.installPrompt=e;showInstallSheet();if(state.route==='more')renderMore();});
-window.addEventListener('appinstalled',()=>{state.installPrompt=null;document.body.classList.add('standalone');hideInstallSheet();toast('F1 Hub installed');});
-function showInstallSheet(){if(isStandalone()||sessionStorage.getItem('f1hub-install-dismissed'))return;const s=document.getElementById('install-sheet');if(s)s.classList.remove('hidden');}
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();state.installPrompt=e;const now=document.getElementById('install-now'),later=document.getElementById('install-later'),copy=document.getElementById('install-sheet-copy');if(now)now.classList.remove('hidden');if(later)later.textContent='NOT NOW';if(copy)copy.textContent='Install F1 Hub as a standalone app with its own icon and no browser address bar.';updateInstallUI();if(state.route==='more')renderMore();});
+window.addEventListener('appinstalled',()=>{state.installPrompt=null;localStorage.setItem('f1hub-installed','1');document.body.classList.add('standalone');hideInstallSheet();updateInstallUI();if(state.route==='more')renderMore();toast('F1 Hub installed');});
+function showInstallSheet(force=false){if(isAppInstalled()||(!force&&sessionStorage.getItem('f1hub-install-dismissed')))return;const s=document.getElementById('install-sheet');if(s)s.classList.remove('hidden');}
 function hideInstallSheet(){document.getElementById('install-sheet')?.classList.add('hidden');}
-document.getElementById('install-now')?.addEventListener('click',async()=>{if(!state.installPrompt)return;state.installPrompt.prompt();await state.installPrompt.userChoice;state.installPrompt=null;hideInstallSheet();});
+document.getElementById('install-now')?.addEventListener('click',requestInstall);
 document.getElementById('install-later')?.addEventListener('click',()=>{sessionStorage.setItem('f1hub-install-dismissed','1');hideInstallSheet();});
 if('serviceWorker' in navigator && location.protocol!=='file:')navigator.serviceWorker.register('./service-worker.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});
 if(!navigator.onLine){document.getElementById('connection-pill').textContent='OFFLINE';document.getElementById('connection-pill').className='pill warn';}
+updateInstallUI();
 loadBase();

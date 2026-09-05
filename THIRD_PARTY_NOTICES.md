@@ -13,5 +13,7 @@ F1 Hub is an unofficial personal project and is not affiliated with Formula 1, t
 - F1DB circuit assets — used for newer layouts where specified; CC BY 4.0.
 
 No official F1 logo or official F1 typeface is included in the app.
-- Wikipedia / Wikimedia Commons — fallback driver profile images when the OpenF1/F1 media headshot is unavailable. The app links driver profiles back to their source page; individual image licences/credits remain available there.
+- Wikipedia / Wikimedia Commons — fallback driver profile images when the OpenF1 headshot is unavailable. Arvid Lindblad uses the CC0 image “Arvid lindblad Budapest 2026.jpg” by Theluckylion from Wikimedia Commons.
 - Windy — embedded weather-radar map and full-radar links centred on circuit coordinates.
+
+- Google Docs Viewer — used to display official FIA PDF steward documents in-browser without forcing a local file download.

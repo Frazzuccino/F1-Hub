@@ -22,7 +22,7 @@ const JINA = 'https://r.jina.ai/';
 const MOTORSPORT_STANDINGS = `https://www.motorsport.com/f1/standings/${YEAR}/`;
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const APP_VERSION = '1.11.8';
+const APP_VERSION = '1.11.9';
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -118,6 +118,26 @@ function age(dob){ if(!dob)return '—'; const d=new Date(dob+'T12:00:00Z'),n=ne
 function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),1800); }
 function cacheGet(key,maxAge){ try{const x=JSON.parse(localStorage.getItem('f1hub:'+key)); if(!x)return null;if(maxAge && Date.now()-x.t>maxAge)return null;return x.v;}catch{return null;} }
 function cachePut(key,v){ try{localStorage.setItem('f1hub:'+key,JSON.stringify({t:Date.now(),v}));}catch{} return v; }
+
+function hydrateBaseFromCache(){
+  try{
+    const sched=cacheGet('schedule');
+    const ds=cacheGet('drivers');
+    const cs=cacheGet('constructors');
+    const of1=cacheGet('photos');
+    const news=cacheGet('news-combined');
+    if(sched)state.schedule=sched?.MRData?.RaceTable?.Races||state.schedule;
+    if(ds){const table=ds?.MRData?.StandingsTable||{};const rows=table.StandingsLists?.[0]?.DriverStandings||[];if(rows.length){state.drivers=rows;state.driverStandingsRound=Number(table.round||0);}}
+    if(cs){const table=cs?.MRData?.StandingsTable||{};const rows=table.StandingsLists?.[0]?.ConstructorStandings||[];if(rows.length){state.constructors=rows;state.constructorStandingsRound=Number(table.round||0);}}
+    if(Array.isArray(of1)&&of1.length)state.photos=Object.fromEntries(of1.filter(x=>x.name_acronym).map(x=>[x.name_acronym,x]));
+    if(Array.isArray(news)&&news.length){state.news=news;const newest=Math.max(...news.map(n=>new Date(n.pubDate||0).getTime()).filter(Number.isFinite));state.newsLatestArticleAt=Number.isFinite(newest)?newest:0;}
+    // A bundled just-completed-round snapshot can correct a stale cached standings table instantly.
+    const latest=latestCompletedRace();if(latest)applyBundledStandingsSnapshot(Number(latest.round||0));
+    state.loaded=state.schedule.length>0||state.drivers.length>0;
+    if(state.loaded){state.dataStamp=new Date();render();}
+    return state.loaded;
+  }catch{return false;}
+}
 async function fetchJSON(url,key,maxAge=15*60e3,timeoutMs=14000){
   const fresh=cacheGet(key,maxAge); if(fresh)return fresh;
   try{const c=new AbortController();const t=setTimeout(()=>c.abort(),timeoutMs);const r=await fetch(url,{signal:c.signal});clearTimeout(t);if(!r.ok){const err=new Error(`${r.status}`);err.status=r.status;throw err;}return cachePut(key,await r.json());}
@@ -341,31 +361,50 @@ async function refreshNewsOnly(force=false){
 }
 
 async function loadBase(force=false){
-  state.refreshing=true; if(force){['schedule','drivers','constructors','photos','wiki-photos-'+YEAR].forEach(k=>localStorage.removeItem('f1hub:'+k));}
+  state.refreshing=true;
+  if(force){['schedule','drivers','constructors','photos','wiki-photos-'+YEAR].forEach(k=>localStorage.removeItem('f1hub:'+k));}
+
+  // News is intentionally non-blocking during normal startup. It can involve many publisher/proxy
+  // requests, so waiting for it here made the whole PWA feel slow even when cached app data existed.
+  const newsTask=loadNewsSources(force).then(()=>{if(state.route==='news')renderNews();}).catch(()=>{});
+  let standingsTask=Promise.resolve();
+  let wikiTask=Promise.resolve();
+
   try{
-    const newsPromise=loadNewsSources(force);
     const [sched,ds,cs,of1] = await Promise.allSettled([
       fetchJSON(`${JOLPICA}/${YEAR}/?limit=100`,'schedule',force?1:30*60e3),
       fetchJSON(`${JOLPICA}/${YEAR}/driverstandings/?limit=100`,'drivers',force?1:15*60e3),
       fetchJSON(`${JOLPICA}/${YEAR}/constructorstandings/?limit=100`,'constructors',force?1:15*60e3),
       fetchJSON(`${OPENF1}/drivers?session_key=latest`,'photos',force?1:6*3600e3)
     ]);
-    if(sched.status==='fulfilled')state.schedule=sched.value?.MRData?.RaceTable?.Races||[];
+    if(sched.status==='fulfilled')state.schedule=sched.value?.MRData?.RaceTable?.Races||state.schedule;
     if(ds.status==='fulfilled'){
       const table=ds.value?.MRData?.StandingsTable||{};
-      state.drivers=table.StandingsLists?.[0]?.DriverStandings||[];
-      state.driverStandingsRound=Number(table.round||0);
+      const rows=table.StandingsLists?.[0]?.DriverStandings||[];
+      if(rows.length){state.drivers=rows;state.driverStandingsRound=Number(table.round||0);}
     }
     if(cs.status==='fulfilled'){
       const table=cs.value?.MRData?.StandingsTable||{};
-      state.constructors=table.StandingsLists?.[0]?.ConstructorStandings||[];
-      state.constructorStandingsRound=Number(table.round||0);
+      const rows=table.StandingsLists?.[0]?.ConstructorStandings||[];
+      if(rows.length){state.constructors=rows;state.constructorStandingsRound=Number(table.round||0);}
     }
-    if(of1.status==='fulfilled')state.photos=Object.fromEntries((of1.value||[]).filter(x=>x.name_acronym).map(x=>[x.name_acronym,x]));
-    await refreshPostRaceStandings();
-    await Promise.allSettled([newsPromise,loadWikipediaPhotos(force)]);
-    state.loaded=true;state.dataStamp=new Date();
-  } finally { state.refreshing=false; render(); }
+    if(of1.status==='fulfilled'&&of1.value?.length)state.photos=Object.fromEntries(of1.value.filter(x=>x.name_acronym).map(x=>[x.name_acronym,x]));
+
+    // Correct an immediately-available stale cached/current table before the slower network cross-check.
+    const latest=latestCompletedRace();if(latest)applyBundledStandingsSnapshot(Number(latest.round||0));
+    state.loaded=state.schedule.length>0||state.drivers.length>0;
+    state.dataStamp=new Date();
+    render();
+
+    standingsTask=refreshPostRaceStandings().then(()=>{if(['standings','home','drivers','teams'].includes(state.route))render();}).catch(()=>{});
+    wikiTask=loadWikipediaPhotos(force).then(()=>{if(state.route==='drivers'||state.route.startsWith('driver:'))render();}).catch(()=>{});
+
+    // A manual refresh still waits for all visible data to finish. Routine app startup does not.
+    if(force)await Promise.allSettled([newsTask,standingsTask,wikiTask]);
+  } finally {
+    state.refreshing=false;
+    if(force&&state.loaded)render();
+  }
   refreshPenaltyData();
   preloadRaceWinners(force);
 }
@@ -1677,4 +1716,6 @@ document.addEventListener('visibilitychange',()=>{
 });
 window.addEventListener('pageshow',()=>{if(state.loaded&&Date.now()-(state.newsUpdatedAt||0)>3*60e3)refreshNewsOnly(true);if(state.loaded&&latestCompletedRace()&&Date.now()-(state.standingsUpdatedAt||0)>5*60e3)refreshChampionshipOnly();});
 setInterval(()=>{if(!document.hidden&&state.loaded&&Date.now()-(state.newsUpdatedAt||0)>10*60e3)refreshNewsOnly(true);},60e3);
+// Paint cached content immediately, then refresh it without blocking startup.
+hydrateBaseFromCache();
 loadBase();

@@ -1,4 +1,4 @@
-# F1 Hub v1.11.8 — update / install
+# F1 Hub v1.11.9 — update / install
 
 ## Update GitHub Pages
 1. Replace the files in your existing F1 Hub GitHub Pages repository with everything in this folder.
@@ -6,9 +6,9 @@
 3. Commit the change and wait for GitHub Pages to redeploy.
 
 ## Force the latest version once
-Open your F1 Hub URL once with `?v=1118` on the end. In **More**, the footer should say **F1 Hub v1.11.8**.
+Open your F1 Hub URL once with `?v=1119` on the end. In **More**, the footer should say **F1 Hub v1.11.9**.
 
-## Changed in v1.11.8
+## Changed in v1.11.9
 - Fixed post-race OpenF1 classifications where drivers with a null position (DNF/DNS/DSQ) were sorting ahead of P1.
 - Session Recap now chooses the winner and podium only from valid classified positions.
 - DNF/DNS/DSQ entries remain visible but are placed after classified finishers.

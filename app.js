@@ -8,19 +8,21 @@ const F1_ARCHIVE = 'https://livetiming.formula1.com/static';
 const ARCHIVE_INDEX_FALLBACK_API = 'https://f1-live-api.onrender.com';
 const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
 const NEWS_SOURCES = [
-  {id:'BBC',name:'BBC Sport',feed:'https://feeds.bbci.co.uk/sport/formula1/rss.xml'},
-  {id:'AUTOSPORT',name:'Autosport',feed:'https://www.autosport.com/rss/f1/news/'},
-  {id:'MOTORSPORT',name:'Motorsport.com',feed:'https://www.motorsport.com/rss/f1/news/'},
-  {id:'RACEFANS',name:'RaceFans',feed:'https://www.racefans.net/feed/'},
-  {id:'THERACE',name:'The Race',feed:'https://www.the-race.com/category/formula-1/feed/'}
+  {id:'F1',name:'F1.com',domain:'formula1.com'},
+  {id:'BBC',name:'BBC Sport',domain:'bbc.co.uk',feed:'https://feeds.bbci.co.uk/sport/formula1/rss.xml'},
+  {id:'AUTOSPORT',name:'Autosport',domain:'autosport.com',feed:'https://www.autosport.com/rss/f1/news/'},
+  {id:'MOTORSPORT',name:'Motorsport.com',domain:'motorsport.com',feed:'https://www.motorsport.com/rss/f1/news/'},
+  {id:'RACEFANS',name:'RaceFans',domain:'racefans.net',feed:'https://www.racefans.net/feed/'},
+  {id:'THERACE',name:'The Race',domain:'the-race.com',feed:'https://www.the-race.com/category/formula-1/feed/'}
 ];
 const FIA_DOCS = 'https://www.fia.com/documents/formula-1';
 const PENALTY_SOURCE = 'https://racingnews365.com/penalty-points-f1-drivers';
 const REPRIMAND_SOURCE = 'https://timepenalty.com/guide/reprimand';
 const JINA = 'https://r.jina.ai/';
+const MOTORSPORT_STANDINGS = `https://www.motorsport.com/f1/standings/${YEAR}/`;
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const APP_VERSION = '1.11.6';
+const APP_VERSION = '1.11.8';
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -82,10 +84,19 @@ const FALLBACK_POINTS = {
 };
 const FALLBACK_REPRIMANDS = {'Gabriel Bortoleto':1,'Oliver Bearman':1,'Alex Albon':2,'Nico Hulkenberg':1,'Carlos Sainz':1,'Lewis Hamilton':1,'Kimi Antonelli':1,'Sergio Perez':2,'Liam Lawson':1,'George Russell':1};
 
+// Emergency post-race snapshot used only when live championship sources are still lagging.
+// Round 13 values are the published standings after the 2026 Italian Grand Prix.
+const BUNDLED_STANDINGS_SNAPSHOTS = {
+  13:{
+    drivers:{ANT:[267,7],RUS:[201,2],HAM:[191,1],NOR:[171,2],LEC:[155,1],VER:[127,0],PIA:[116,0],HAD:[71,0],LAW:[51,0],GAS:[41,0],LIN:[29,0],COL:[21,0],BEA:[18,0],BOR:[10,0],HUL:[6,0],SAI:[6,0],ALB:[5,0],OCO:[3,0],ALO:[3,0],TSU:[1,0],STR:[0,0],BOT:[0,0],PER:[0,0]},
+    constructors:{mercedes:[468,9],ferrari:[346,2],mclaren:[287,2],redbull:[204,0],racingbulls:[75,0],alpine:[62,0],haas:[21,0],audi:[16,0],williams:[11,0],astonmartin:[3,0],cadillac:[0,0]}
+  }
+};
+
 const state = {
   route:'home', schedule:[], drivers:[], constructors:[], photos:{}, wikiPhotos:{}, news:[], newsSource:'ALL', spoilerNewsRevealedRound:null, standingsSpoilerRevealedRound:null,
   penaltyPoints:{...FALLBACK_POINTS}, reprimands:{...FALLBACK_REPRIMANDS}, stewardDocs:{}, historyYear:YEAR-1, historyCache:{}, carUpdateDocs:{},
-  loaded:false, refreshing:false, newsRefreshing:false, newsUpdatedAt:0, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null
+  loaded:false, refreshing:false, newsRefreshing:false, newsUpdatedAt:0, newsLatestArticleAt:0, standingsRefreshing:false, standingsUpdatedAt:0, driverStandingsRound:0, constructorStandingsRound:0, standingsDerivedRound:0, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null
 };
 const view = document.getElementById('view');
 
@@ -221,15 +232,23 @@ function driverPhotoError(img){ const fb=img.dataset.fallback; if(fb){img.datase
 window.driverPhotoError=driverPhotoError;
 
 function rssCacheBust(url){
-  try{const u=new URL(url);u.searchParams.set('_f1hub',String(Date.now()));return u.toString();}catch{return url;}
+  try{const u=new URL(url);u.searchParams.set('_f1hub',String(Math.floor(Date.now()/300000)));return u.toString();}catch{return url;}
 }
-async function fetchNewsText(url,force=false,timeoutMs=14000){
+async function fetchNewsText(url,force=false,timeoutMs=10000){
   const target=force?rssCacheBust(url):url;
   const c=new AbortController();const timer=setTimeout(()=>c.abort(),timeoutMs);
   try{
     const r=await fetch(target,{signal:c.signal,cache:'no-store'});
     if(!r.ok)throw new Error(`${r.status}`);
     return await r.text();
+  } finally { clearTimeout(timer); }
+}
+async function fetchNewsJSONNoCache(url,timeoutMs=10000){
+  const c=new AbortController();const timer=setTimeout(()=>c.abort(),timeoutMs);
+  try{
+    const r=await fetch(url,{signal:c.signal,cache:'no-store'});
+    if(!r.ok)throw new Error(`${r.status}`);
+    return await r.json();
   } finally { clearTimeout(timer); }
 }
 function xmlNodeText(node,names){
@@ -242,12 +261,17 @@ function rssImage(node,description=''){
   }
   const m=String(description||'').match(/<img[^>]+src=["']([^"']+)["']/i);return m?.[1]||'';
 }
+function cleanAggregatedTitle(title,src){
+  let t=String(title||'').trim();
+  for(const suffix of [` - ${src.name}`,` – ${src.name}`,` | ${src.name}`])if(t.endsWith(suffix))t=t.slice(0,-suffix.length).trim();
+  return t;
+}
 function parseRSS(xml,src){
   const doc=new DOMParser().parseFromString(String(xml||''),'application/xml');
   if(doc.querySelector('parsererror'))return [];
   const nodes=[...doc.getElementsByTagName('item'),...doc.getElementsByTagName('entry')];
   return nodes.slice(0,24).map(node=>{
-    const title=xmlNodeText(node,['title']);
+    const title=cleanAggregatedTitle(xmlNodeText(node,['title']),src);
     let link='';
     for(const el of [...(node.getElementsByTagName('link')||[])]){link=el.getAttribute?.('href')||el.textContent?.trim()||'';if(link)break;}
     const pubDate=xmlNodeText(node,['pubDate','published','updated','dc:date']);
@@ -255,14 +279,43 @@ function parseRSS(xml,src){
     return {title,link,pubDate,thumbnail:rssImage(node,description),description,source:src.name,sourceId:src.id};
   }).filter(x=>x.title&&x.link);
 }
+function googleNewsRss(src){
+  const u=new URL('https://news.google.com/rss/search');
+  u.searchParams.set('q',`Formula 1 site:${src.domain} when:1d`);
+  u.searchParams.set('hl','en-GB');u.searchParams.set('gl','GB');u.searchParams.set('ceid','GB:en');
+  // A five-minute bucket changes the feed URL seen by rss2json, preventing an old converted feed being pinned for hours.
+  u.searchParams.set('_f1hub',String(Math.floor(Date.now()/300000)));
+  return u.toString();
+}
+function normaliseNewsJsonItems(j,src){
+  if(j?.status!=='ok')return [];
+  return (j.items||[]).slice(0,20).map(n=>({...n,title:cleanAggregatedTitle(n.title,src),source:src.name,sourceId:src.id})).filter(x=>x.title&&x.link);
+}
+async function fetchGoogleNewsItems(src){
+  const feed=googleNewsRss(src);
+  const bucket=Math.floor(Date.now()/300000);
+  const url=RSS2JSON+encodeURIComponent(feed)+`&_f1hub=${bucket}`;
+  try{return normaliseNewsJsonItems(await fetchNewsJSONNoCache(url,10000),src);}catch{return [];}
+}
+async function fetchPublisherItems(src,force=false){
+  if(!src.feed)return [];
+  const direct=(async()=>{try{const xml=await fetchNewsText(src.feed,force,8000);return parseRSS(xml,src);}catch{return [];}})();
+  const proxy=(async()=>{try{const target=force?rssCacheBust(src.feed):src.feed;const raw=`https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`;const xml=await fetchNewsText(raw,false,9000);return parseRSS(xml,src);}catch{return [];}})();
+  const legacy=(async()=>{try{const target=force?rssCacheBust(src.feed):src.feed;const url=RSS2JSON+encodeURIComponent(target)+`&_f1hub=${Math.floor(Date.now()/300000)}`;return normaliseNewsJsonItems(await fetchNewsJSONNoCache(url),src);}catch{return [];}})();
+  const settled=await Promise.allSettled([direct,proxy,legacy]);
+  return settled.flatMap(x=>x.status==='fulfilled'?x.value:[]);
+}
 async function fetchRSSItems(src,force=false){
-  // Prefer the publisher feed itself so the app is not dependent on rss2json's cache.
-  try{const xml=await fetchNewsText(src.feed,force);const rows=parseRSS(xml,src);if(rows.length)return rows;}catch{}
-  // Most publisher feeds do not expose browser CORS headers. Read the same public XML through AllOrigins.
-  try{const raw=`https://api.allorigins.win/raw?url=${encodeURIComponent(force?rssCacheBust(src.feed):src.feed)}${force?`&cb=${Date.now()}`:''}`;const xml=await fetchNewsText(raw,false);const rows=parseRSS(xml,src);if(rows.length)return rows;}catch{}
-  // Legacy fallback only. This can be stale, so never make it the preferred route.
-  try{const j=await fetchJSON(RSS2JSON+encodeURIComponent(src.feed),`news-rss2json-${src.id}`,force?1:10*60e3);if(j?.status==='ok')return (j.items||[]).slice(0,18).map(n=>({...n,source:src.name,sourceId:src.id}));}catch{}
-  return [];
+  // Google News is queried per publisher and merged with the publisher's own feed.
+  // This gives us newly-indexed session/result stories even when a publisher RSS cache is delayed.
+  const [googleItems,publisherItems]=await Promise.all([fetchGoogleNewsItems(src),fetchPublisherItems(src,force)]);
+  const all=[...googleItems,...publisherItems];
+  const seen=new Set();
+  return all.sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0)).filter(n=>{
+    const title=String(n.title||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+    const key=title||String(n.link||'').replace(/\?.*$/,'').toLowerCase();
+    if(!key||seen.has(key))return false;seen.add(key);return true;
+  }).slice(0,24);
 }
 async function loadNewsSources(force=false){
   if(force)NEWS_SOURCES.forEach(src=>{localStorage.removeItem('f1hub:news-'+src.id);localStorage.removeItem('f1hub:news-rss2json-'+src.id);});
@@ -271,8 +324,14 @@ async function loadNewsSources(force=false){
   const seen=new Set();
   const fresh=items.sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0)).filter(n=>{const k=(n.link||n.title||'').replace(/\?.*$/,'').toLowerCase();if(!k||seen.has(k))return false;seen.add(k);return true;}).slice(0,80);
   // Keep old stories only when every live source is unreachable; never overwrite fresh data with stale fallback data.
-  if(fresh.length){state.news=fresh;cachePut('news-combined',fresh);state.newsUpdatedAt=Date.now();}
-  else {const old=cacheGet('news-combined');if(old?.length)state.news=old;}
+  if(fresh.length){
+    state.news=fresh;cachePut('news-combined',fresh);state.newsUpdatedAt=Date.now();
+    const newest=Math.max(...fresh.map(n=>new Date(n.pubDate||0).getTime()).filter(Number.isFinite));
+    state.newsLatestArticleAt=Number.isFinite(newest)?newest:0;
+  } else {
+    const old=cacheGet('news-combined');
+    if(old?.length){state.news=old;const newest=Math.max(...old.map(n=>new Date(n.pubDate||0).getTime()).filter(Number.isFinite));state.newsLatestArticleAt=Number.isFinite(newest)?newest:0;}
+  }
   return state.news;
 }
 async function refreshNewsOnly(force=false){
@@ -292,14 +351,149 @@ async function loadBase(force=false){
       fetchJSON(`${OPENF1}/drivers?session_key=latest`,'photos',force?1:6*3600e3)
     ]);
     if(sched.status==='fulfilled')state.schedule=sched.value?.MRData?.RaceTable?.Races||[];
-    if(ds.status==='fulfilled')state.drivers=ds.value?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings||[];
-    if(cs.status==='fulfilled')state.constructors=cs.value?.MRData?.StandingsTable?.StandingsLists?.[0]?.ConstructorStandings||[];
+    if(ds.status==='fulfilled'){
+      const table=ds.value?.MRData?.StandingsTable||{};
+      state.drivers=table.StandingsLists?.[0]?.DriverStandings||[];
+      state.driverStandingsRound=Number(table.round||0);
+    }
+    if(cs.status==='fulfilled'){
+      const table=cs.value?.MRData?.StandingsTable||{};
+      state.constructors=table.StandingsLists?.[0]?.ConstructorStandings||[];
+      state.constructorStandingsRound=Number(table.round||0);
+    }
     if(of1.status==='fulfilled')state.photos=Object.fromEntries((of1.value||[]).filter(x=>x.name_acronym).map(x=>[x.name_acronym,x]));
+    await refreshPostRaceStandings();
     await Promise.allSettled([newsPromise,loadWikipediaPhotos(force)]);
     state.loaded=true;state.dataStamp=new Date();
   } finally { state.refreshing=false; render(); }
   refreshPenaltyData();
   preloadRaceWinners(force);
+}
+
+function latestCompletedRace(){
+  return state.schedule.filter(r=>raceSessionDone(r)).slice().sort((a,b)=>Number(b.round)-Number(a.round))[0]||null;
+}
+function teamStandingsKey(name=''){
+  const s=String(name).toLowerCase().replace(/[^a-z0-9]+/g,'');
+  if(s.includes('racingbull')||s.includes('rbf1'))return 'racingbulls';
+  if(s.includes('redbull'))return 'redbull';
+  if(s.includes('mercedes'))return 'mercedes';
+  if(s.includes('ferrari'))return 'ferrari';
+  if(s.includes('mclaren'))return 'mclaren';
+  if(s.includes('astonmartin'))return 'astonmartin';
+  if(s.includes('williams'))return 'williams';
+  if(s.includes('haas'))return 'haas';
+  if(s.includes('alpine'))return 'alpine';
+  if(s.includes('audi'))return 'audi';
+  if(s.includes('cadillac'))return 'cadillac';
+  return s;
+}
+function addMapPoint(map,key,value){const n=Number(value||0);if(key&&Number.isFinite(n))map[key]=(map[key]||0)+n;}
+function pointsForPosition(pos,sprint=false){const p=Number(pos),scale=sprint?[8,7,6,5,4,3,2,1]:[25,18,15,12,10,8,6,4,2,1];return Number.isFinite(p)&&p>=1&&p<=scale.length?scale[p-1]:0;}
+async function weekendPoints(r){
+  const driverPoints={},teamPoints={};let raceWinnerCode='',raceWinnerTeam='',hadData=false;
+  const ss=sessions(r),scored=[];const sprint=ss.find(x=>x.key==='sprint'),race=ss.find(x=>x.key==='race');if(sprint&&sessionIsDone(sprint))scored.push(sprint);if(race&&sessionIsDone(race))scored.push(race);
+  for(const s of scored){
+    let used=false;
+    try{
+      const endpoint=s.key==='sprint'?'sprint':'results';
+      const j=await fetchNoStoreJSON(`${JOLPICA}/${YEAR}/${r.round}/${endpoint}/?limit=100&_=${Date.now()}`),rr=j?.MRData?.RaceTable?.Races?.[0],rows=s.key==='sprint'?(rr?.SprintResults||[]):(rr?.Results||[]);
+      if(rows.length){for(const x of rows){const pts=Number(x.points||0),code=driverCode(x.Driver),team=x.Constructor?.name||'';addMapPoint(driverPoints,code,pts);addMapPoint(teamPoints,teamStandingsKey(team),pts);if(s.key==='race'&&Number(x.position)===1){raceWinnerCode=code;raceWinnerTeam=teamStandingsKey(team);}}used=true;hadData=true;}
+    }catch{}
+    if(used)continue;
+    try{
+      const os=await openF1Session(r,s);if(!os)continue;
+      const [rows,drivers]=await Promise.all([fetchNoStoreJSON(`${OPENF1}/session_result?session_key=${os.session_key}`),fetchNoStoreJSON(`${OPENF1}/drivers?session_key=${os.session_key}`)]),dmap=openF1DriverMap(drivers);
+      for(const x of rows||[]){const p=validSessionPosition(x);if(p===null)continue;hadData=true;const d=dmap[String(x.driver_number)]||{},code=d.name_acronym||'',team=teamStandingsKey(d.team_name||''),pts=pointsForPosition(p,s.key==='sprint');addMapPoint(driverPoints,code,pts);addMapPoint(teamPoints,team,pts);if(s.key==='race'&&p===1){raceWinnerCode=code;raceWinnerTeam=team;}}
+    }catch{}
+  }
+  return {driverPoints,teamPoints,raceWinnerCode,raceWinnerTeam,hadData};
+}
+function standingsNameKey(v=''){return String(v).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ');}
+function cleanMarkdownCell(v=''){return String(v).replace(/\[([^\]]+)\]\([^)]+\)/g,'$1').replace(/[*_`]/g,'').trim();}
+function parseMotorsportDriverStandings(text){
+  const lines=String(text||'').split(/\r?\n/),start=lines.findIndex(x=>/^###\s+Drivers\s*$/i.test(x.trim()));if(start<0)return [];
+  const out=[];
+  for(const line of lines.slice(start+1)){
+    if(/^####\s+Subscribe/i.test(line)||/^###\s+Teams/i.test(line))break;
+    if(!line.includes('|'))continue;
+    const cells=line.split('|').map(cleanMarkdownCell);const pos=Number(cells[0]),ptsText=String(cells[2]||'').trim();if(!Number.isFinite(pos)||pos<1)continue;
+    const points=ptsText===''?0:Number(ptsText.replace(/[^0-9.\-]/g,''));if(!Number.isFinite(points))continue;
+    out.push({position:pos,name:cells[1]||'',points});
+  }
+  return out;
+}
+async function refreshDriversFromMotorsport(targetRound,baseRound){
+  try{
+    const text=await fetchNoStoreText(`${JINA}${MOTORSPORT_STANDINGS}?_=${Date.now()}`),rows=parseMotorsportDriverStandings(text);if(rows.length<20)return false;
+    const byFamily=new Map(state.drivers.map(s=>[standingsNameKey(s.Driver?.familyName),s]));const matched=[];
+    for(const row of rows){const key=standingsNameKey(row.name);let current=null;for(const [family,s] of byFamily){if(family&&key.includes(family)){current=s;break;}}if(current)matched.push({...current,position:String(row.position),positionText:String(row.position),points:String(row.points)});}
+    if(matched.length<Math.min(20,state.drivers.length))return false;
+    const existing=new Map(matched.map(x=>[x.Driver.driverId,x]));state.drivers=state.drivers.map(x=>existing.get(x.Driver.driverId)||x);
+    if(Number(baseRound||0)>0&&Number(baseRound)<targetRound){for(const r of state.schedule.filter(x=>Number(x.round)>Number(baseRound)&&Number(x.round)<=targetRound&&raceSessionDone(x)).sort((a,b)=>Number(a.round)-Number(b.round))){const pts=await weekendPoints(r);if(pts.hadData&&pts.raceWinnerCode){state.drivers=state.drivers.map(x=>driverCode(x.Driver)===pts.raceWinnerCode?{...x,wins:String(Number(x.wins||0)+1)}:x);}}}
+    state.drivers=state.drivers.slice().sort((a,b)=>Number(a.position)-Number(b.position));state.driverStandingsRound=targetRound;state.standingsDerivedRound=targetRound;return true;
+  }catch{return false;}
+}
+function resortDriverStandings(rows){const indexed=rows.map((x,i)=>({x,i})).sort((a,b)=>Number(b.x.points)-Number(a.x.points)||Number(b.x.wins)-Number(a.x.wins)||a.i-b.i);return indexed.map(({x},i)=>({...x,position:String(i+1),positionText:String(i+1)}));}
+function resortConstructorStandings(rows){const indexed=rows.map((x,i)=>({x,i})).sort((a,b)=>Number(b.x.points)-Number(a.x.points)||Number(b.x.wins)-Number(a.x.wins)||a.i-b.i);return indexed.map(({x},i)=>({...x,position:String(i+1),positionText:String(i+1)}));}
+async function deriveStandingsThroughRound(targetRound){
+  const dBase=Number(state.driverStandingsRound||0),cBase=Number(state.constructorStandingsRound||0),start=Math.min(dBase||Infinity,cBase||Infinity);if(!Number.isFinite(start)||start>=targetRound)return false;
+  const missing=state.schedule.filter(r=>Number(r.round)>start&&Number(r.round)<=targetRound&&raceSessionDone(r)).sort((a,b)=>Number(a.round)-Number(b.round));if(!missing.length)return false;
+  let drivers=state.drivers.map(x=>({...x})),constructors=state.constructors.map(x=>({...x}));let changed=false;
+  for(const r of missing){
+    const pts=await weekendPoints(r),rn=Number(r.round);if(!pts.hadData)continue;
+    if(dBase<rn){drivers=drivers.map(x=>{const code=driverCode(x.Driver),add=Number(pts.driverPoints[code]||0);return {...x,points:String(Number(x.points||0)+add),wins:String(Number(x.wins||0)+(pts.raceWinnerCode===code?1:0))};});changed=true;}
+    if(cBase<rn){constructors=constructors.map(x=>{const key=teamStandingsKey(x.Constructor?.name),add=Number(pts.teamPoints[key]||0);return {...x,points:String(Number(x.points||0)+add),wins:String(Number(x.wins||0)+(pts.raceWinnerTeam===key?1:0))};});changed=true;}
+  }
+  if(changed){if(dBase<targetRound){state.drivers=resortDriverStandings(drivers);state.driverStandingsRound=targetRound;}if(cBase<targetRound){state.constructors=resortConstructorStandings(constructors);state.constructorStandingsRound=targetRound;}state.standingsDerivedRound=targetRound;}
+  return changed;
+}
+function applyBundledStandingsSnapshot(round){
+  if(YEAR!==2026)return false;
+  const snap=BUNDLED_STANDINGS_SNAPSHOTS[Number(round)];if(!snap)return false;
+  let changed=false;
+  if(state.drivers.length){
+    const have=Object.fromEntries(state.drivers.map(x=>[driverCode(x.Driver),Number(x.points||0)]));
+    const leader=Object.entries(snap.drivers).sort((a,b)=>Number(b[1][0])-Number(a[1][0]))[0];
+    const stale=!!leader&&have[leader[0]]!=null&&have[leader[0]]<Number(leader[1][0]);
+    if(stale){state.drivers=resortDriverStandings(state.drivers.map(x=>{const v=snap.drivers[driverCode(x.Driver)];return v?{...x,points:String(v[0]),wins:String(v[1])}:x;}));state.driverStandingsRound=Number(round);changed=true;}
+  }
+  if(state.constructors.length){
+    const have=Object.fromEntries(state.constructors.map(x=>[teamStandingsKey(x.Constructor?.name),Number(x.points||0)]));
+    const leader=Object.entries(snap.constructors).sort((a,b)=>Number(b[1][0])-Number(a[1][0]))[0];
+    const stale=!!leader&&have[leader[0]]!=null&&have[leader[0]]<Number(leader[1][0]);
+    if(stale){state.constructors=resortConstructorStandings(state.constructors.map(x=>{const v=snap.constructors[teamStandingsKey(x.Constructor?.name)];return v?{...x,points:String(v[0]),wins:String(v[1])}:x;}));state.constructorStandingsRound=Number(round);changed=true;}
+  }
+  if(changed)state.standingsDerivedRound=Number(round);
+  return changed;
+}
+
+async function refreshPostRaceStandings(){
+  const latest=latestCompletedRace();if(!latest)return false;const round=Number(latest.round||0);if(!round)return false;
+  const recent=Date.now()-new Date(raceIso(latest)).getTime()<36*3600e3;
+  const baseDriverRound=Number(state.driverStandingsRound||0);
+  if(baseDriverRound>=round&&Number(state.constructorStandingsRound||0)>=round&&!recent){state.standingsDerivedRound=0;state.standingsUpdatedAt=Date.now();return true;}
+  const [ds,cs]=await Promise.allSettled([fetchNoStoreJSON(`${JOLPICA}/${YEAR}/${round}/driverstandings/?limit=100&_=${Date.now()}`),fetchNoStoreJSON(`${JOLPICA}/${YEAR}/${round}/constructorstandings/?limit=100&_=${Date.now()}`)]);
+  if(ds.status==='fulfilled'){const table=ds.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.DriverStandings||[],rr=Number(table.round||round);if(rows.length&&rr>=round){state.drivers=rows;state.driverStandingsRound=round;}}
+  if(cs.status==='fulfilled'){const table=cs.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.ConstructorStandings||[],rr=Number(table.round||round);if(rows.length&&rr>=round){state.constructors=rows;state.constructorStandingsRound=round;}}
+  // In the hours after a race a standings endpoint can report the new round number while still
+  // carrying the previous points. Cross-check a separately published current standings table.
+  if(recent||Number(state.driverStandingsRound||0)<round)await refreshDriversFromMotorsport(round,baseDriverRound);
+  if(Number(state.driverStandingsRound||0)<round||Number(state.constructorStandingsRound||0)<round)await deriveStandingsThroughRound(round);
+  // Last-resort exact snapshot for a just-completed round, so a lagging/blocked upstream feed
+  // cannot leave the app showing yesterday's championship table.
+  applyBundledStandingsSnapshot(round);
+  if(Number(state.driverStandingsRound||0)>=round&&Number(state.constructorStandingsRound||0)>=round&&state.standingsDerivedRound!==round)state.standingsDerivedRound=0;
+  state.standingsUpdatedAt=Date.now();return true;
+}
+async function refreshChampionshipOnly(){
+  if(state.standingsRefreshing)return;state.standingsRefreshing=true;
+  try{
+    const [ds,cs]=await Promise.allSettled([fetchNoStoreJSON(`${JOLPICA}/${YEAR}/driverstandings/?limit=100&_=${Date.now()}`),fetchNoStoreJSON(`${JOLPICA}/${YEAR}/constructorstandings/?limit=100&_=${Date.now()}`)]);
+    if(ds.status==='fulfilled'){const table=ds.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.DriverStandings||[];if(rows.length){state.drivers=rows;state.driverStandingsRound=Number(table.round||0);}}
+    if(cs.status==='fulfilled'){const table=cs.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.ConstructorStandings||[];if(rows.length){state.constructors=rows;state.constructorStandingsRound=Number(table.round||0);}}
+    state.standingsDerivedRound=0;await refreshPostRaceStandings();if(['standings','home','drivers','teams'].includes(state.route))render();
+  }finally{state.standingsRefreshing=false;state.standingsUpdatedAt=Date.now();}
 }
 
 async function refreshPenaltyData(){
@@ -452,8 +646,11 @@ function renderRaces(){
 function renderStandings(){
   const sr=spoilerRace(),guard=spoilerActive()&&sr&&raceSessionDone(sr)&&!standingsSpoilersRevealed();
   if(guard){view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Standings',spoilerPill())+`<div class="card spoiler-guard"><div class="eyebrow">SPOILER PROTECTED</div><div class="card-title">Post-race standings are hidden until tomorrow</div><div class="muted">You can reveal them now if you already know the race result.</div><div class="spacer"></div><button class="external-btn red" onclick="revealStandingsSpoilers()">REVEAL STANDINGS</button></div>`;return;}
-  view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Standings',spoilerPill())+`<div class="tabs"><button class="tab active" data-stand="drivers">DRIVERS</button><button class="tab" data-stand="constructors">CONSTRUCTORS</button></div><div id="stand-list" class="card">${state.drivers.map(standingRow).join('')}</div>`;
+  const latest=latestCompletedRace(),latestRound=Number(latest?.round||0),behind=latestRound>Math.min(Number(state.driverStandingsRound||0),Number(state.constructorStandingsRound||0));
+  const syncNote=state.standingsDerivedRound===latestRound&&latestRound?`<div class="source-note">LATEST RACE SYNC · Current standings applied while the primary championship feed catches up.</div>`:'';
+  view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Standings',spoilerPill())+`<div class="tabs"><button class="tab active" data-stand="drivers">DRIVERS</button><button class="tab" data-stand="constructors">CONSTRUCTORS</button></div><div id="stand-list" class="card">${state.drivers.map(standingRow).join('')}</div>${syncNote}`;
   document.querySelectorAll('[data-stand]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-stand]').forEach(x=>x.classList.remove('active'));b.classList.add('active');const el=document.getElementById('stand-list');el.innerHTML=b.dataset.stand==='drivers'?state.drivers.map(standingRow).join(''):state.constructors.map(c=>`<div class="standing-row"><div class="pos">${esc(c.position)}</div><div class="driver-line"><i class="team-dot" style="background:${teamColour(c.Constructor.name)}"></i><div><div class="driver-name">${esc(c.Constructor.name)}</div><div class="driver-meta">${esc(c.wins)} wins</div></div></div><div class="points">${esc(c.points)}<small>PTS</small></div></div>`).join('');});
+  if(behind&&!state.standingsRefreshing&&Date.now()-(state.standingsUpdatedAt||0)>2*60e3)refreshChampionshipOnly();
 }
 function fmtNewsTime(d){ if(!d)return ''; const x=new Date(d),mins=Math.round((Date.now()-x)/60000);if(mins<60)return `${Math.max(1,mins)}m`;if(mins<1440)return `${Math.floor(mins/60)}h`;return fmtDate(x.toISOString()); }
 function renderNews(){
@@ -462,9 +659,12 @@ function renderNews(){
   if(!sourceIds.includes(state.newsSource))state.newsSource='ALL';
   const filtered=state.newsSource==='ALL'?state.news:state.news.filter(n=>n.sourceId===state.newsSource);
   const tabs=`<div class="news-source-tabs">${sourceIds.map(id=>{const x=NEWS_SOURCES.find(s=>s.id===id);return `<button class="tab ${state.newsSource===id?'active':''}" data-news-source="${id}">${id==='ALL'?'ALL':esc(x?.name||id)}</button>`;}).join('')}</div>`;
+  const newestTimes=filtered.map(n=>new Date(n.pubDate||0).getTime()).filter(Number.isFinite);
+  const newest=newestTimes.length?Math.max(...newestTimes):0;
+  const freshness=newest?`<div class="news-freshness">LATEST ARTICLE · ${esc(fmtNewsTime(new Date(newest).toISOString()))} AGO</div>`:'';
   const reveal=spoilerActive()?`<div class="card spoiler-settings"><div><div class="eyebrow">SPOILER MODE</div><div class="card-title">Reveal headlines</div><div class="muted">Turn this on if you want headlines visible during this race weekend. You can switch them off again at any time.</div></div>${headlineToggleHtml()}</div><div class="spacer"></div>`:'';
   const cards=filtered.length?filtered.map(n=>guard?`<div class="card news-card spoiler-news-card"><div class="news-body"><div class="news-title">SPOILER HIDDEN</div><div class="news-meta">${esc((n.source||'F1').toUpperCase())} · ${fmtNewsTime(n.pubDate)}</div></div></div>`:`<a class="card news-card news-link" href="${esc(n.link)}" target="_blank" rel="noopener">${n.thumbnail?`<img class="news-img" src="${esc(n.thumbnail)}" alt="" loading="lazy">`:''}<div class="news-body"><div class="news-title">${esc(n.title)}</div><div class="news-meta">${esc((n.source||'F1').toUpperCase())} · ${fmtNewsTime(n.pubDate)}</div></div></a>`).join(''):'<div class="empty">No stories from this source right now.</div>';
-  view.innerHTML=titleBlock('MULTI-SOURCE','Latest News',spoilerPill())+tabs+reveal+`<div class="grid news-grid">${cards}</div>`;
+  view.innerHTML=titleBlock('MULTI-SOURCE','Latest News',spoilerPill())+tabs+freshness+reveal+`<div class="grid news-grid">${cards}</div>`;
   document.querySelectorAll('[data-news-source]').forEach(b=>b.onclick=()=>{state.newsSource=b.dataset.newsSource;renderNews();});
 }
 function renderMore(){ const installed=isAppInstalled(); const canInstall=!!state.installPrompt; const install=!installed?(canInstall?`<div class="spacer"></div><div class="card app-mode-card"><div><div class="eyebrow">INSTALL APP</div><div class="card-title" style="margin-top:5px">Install F1 Hub</div><div class="muted" style="margin-top:5px">Adds F1 Hub to Android with its own icon and no browser address bar.</div></div><button id="install-btn" class="external-btn red">↓ INSTALL</button></div>`:`<div class="spacer"></div><div class="card app-mode-card"><div><div class="eyebrow">APP INSTALL</div><div class="card-title" style="margin-top:5px">Install option is preparing</div><div class="muted" style="margin-top:5px">Refresh once if this remains here. If Chrome still does not expose the install prompt, use ⋮ → Install and create shortcut → Install.</div></div></div>`):''; view.innerHTML=titleBlock('F1 HUB','Explore')+`<div class="menu-grid">
@@ -646,10 +846,19 @@ function openF1Gap(row,s){
   if(Number(row.position)===1)return '';
   const gap=lastValue(row.gap_to_leader);if(typeof gap==='string')return gap.toUpperCase();const g=Number(gap);return Number.isFinite(g)?`+${g.toFixed(3)}`:'';
 }
+function validSessionPosition(row){const p=Number(row?.position);return Number.isFinite(p)&&p>0?p:null;}
+function sortedSessionResults(rows){
+  return (rows||[]).slice().sort((a,b)=>{
+    const pa=validSessionPosition(a),pb=validSessionPosition(b);
+    if(pa!==null||pb!==null){if(pa===null)return 1;if(pb===null)return -1;if(pa!==pb)return pa-pb;}
+    const la=Number(a?.number_of_laps??-1),lb=Number(b?.number_of_laps??-1);if(la!==lb)return lb-la;
+    const rank=x=>x?.dsq?3:x?.dns?2:x?.dnf?1:0;return rank(a)-rank(b);
+  });
+}
 function sessionResultTable(rows,drivers,s){
   if(!rows?.length)return '<div class="card"><div class="empty">Classification not available yet.</div></div>';
   const dmap=openF1DriverMap(drivers);
-  const sorted=rows.slice().sort((a,b)=>Number(a.position)-Number(b.position));
+  const sorted=sortedSessionResults(rows);
   return `<div class="card classification-card"><div class="classification-head"><span>POS</span><span>DRIVER</span><span>${s.key==='race'||s.key==='sprint'?'TIME / GAP':'BEST / GAP'}</span></div><div class="classification-list">${sorted.map(x=>{
     const d=dmap[String(x.driver_number)]||{},team=d.team_name||'',code=d.name_acronym||String(x.driver_number),name=d.last_name||d.full_name||`Car ${x.driver_number}`,gap=openF1Gap(x,s);
     return `<div class="classification-row ${Number(x.position)===1?'winner':''}"><div class="class-pos">${esc(x.position??'—')}</div><div class="driver-line"><i class="team-dot" style="background:${d.team_colour?'#'+d.team_colour:teamColour(team)}"></i><div><div class="driver-name">${esc(code)} · ${esc(name)}</div><div class="driver-meta">${esc(team)}${x.number_of_laps!=null?` · ${esc(x.number_of_laps)} laps`:''}</div></div></div><div class="class-time">${esc(openF1Timing(x,s))}${gap?`<small class="class-gap">${esc(gap)}</small>`:''}</div></div>`;
@@ -658,9 +867,10 @@ function sessionResultTable(rows,drivers,s){
 
 function sessionRecapHtml(rows,drivers,s){
   if(!rows?.length)return '';
-  const dmap=openF1DriverMap(drivers),sorted=rows.slice().sort((a,b)=>Number(a.position)-Number(b.position)),top=sorted.slice(0,3);
+  const dmap=openF1DriverMap(drivers),sorted=sortedSessionResults(rows),classified=sorted.filter(x=>validSessionPosition(x)!==null),top=classified.slice(0,3);
+  if(!top.length)return '';
   const who=x=>{const d=dmap[String(x.driver_number)]||{};return `${d.name_acronym||x.driver_number} · ${d.last_name||d.full_name||('Car '+x.driver_number)}`;};
-  const leader=top[0],p2=top[1],dnfs=sorted.filter(x=>x.dnf||x.dns||x.dsq).length;
+  const leader=classified.find(x=>validSessionPosition(x)===1)||top[0],p2=classified.find(x=>validSessionPosition(x)===2)||top[1],dnfs=sorted.filter(x=>x.dnf||x.dns||x.dsq).length;
   const label=(s.key==='race'||s.key==='sprint')?'WINNER':(s.key==='quali'||s.key==='sprintq')?'POLE / P1':'FASTEST';
   const margin=p2?((s.key==='race'||s.key==='sprint')?openF1Timing(p2,s):openF1Gap(p2,s)):'—';
   return `<div class="card recap-card"><div class="eyebrow">SESSION RECAP</div><div class="recap-hero"><div><div class="recap-sub">${label}</div><div class="recap-main">${esc(who(leader))}</div><div class="recap-sub">${esc(openF1Timing(leader,s))}</div></div><div><div class="recap-sub">MARGIN TO P2</div><div class="recap-gap">${esc(margin||'—')}</div>${(s.key==='race'||s.key==='sprint')?`<div class="recap-sub">${dnfs} DNF / DNS / DSQ</div>`:''}</div></div><div class="recap-top3">${top.map(x=>`<div class="recap-line"><strong>P${esc(x.position)}</strong><span>${esc(who(x))}</span><b>${esc(openF1Timing(x,s))}</b></div>`).join('')}</div></div>`;
@@ -669,7 +879,7 @@ function tyreClass(comp){return String(comp||'UNKNOWN').toLowerCase().replace(/[
 function raceStrategyHtml(stints,drivers,results){
   if(!stints?.length)return '<div class="card"><div class="eyebrow">TYRE STRATEGY</div><div class="empty">Tyre stint data is not available yet.</div></div>';
   const dmap=openF1DriverMap(drivers),by={};for(const x of stints){(by[String(x.driver_number)]??=[]).push(x);}
-  const order=(results||[]).slice().sort((a,b)=>Number(a.position)-Number(b.position)).map(x=>String(x.driver_number));
+  const order=sortedSessionResults(results||[]).map(x=>String(x.driver_number));
   const nums=[...new Set([...order,...Object.keys(by)])];
   return `<div class="card strategy-card"><div class="eyebrow">TYRE STRATEGY</div><div class="strategy-list">${nums.filter(n=>by[n]?.length).map(n=>{const d=dmap[n]||{},ss=by[n].slice().sort((a,b)=>Number(a.stint_number)-Number(b.stint_number));return `<div class="strategy-row"><div class="strategy-driver">${esc(d.name_acronym||n)}</div><div class="strategy-stints">${ss.map(x=>`<span class="tyre ${tyreClass(x.compound)}"><i>${esc((x.compound||'?').slice(0,1))}</i>${esc(x.lap_start??'?')}–${esc(x.lap_end??'?')}</span>`).join('<span class="strategy-arrow">→</span>')}</div><div class="strategy-stops">${Math.max(0,ss.length-1)} stop${ss.length===2?'':'s'}</div></div>`;}).join('')}</div></div>`;
 }
@@ -677,6 +887,11 @@ function raceStrategyHtml(stints,drivers,results){
 async function fetchNoStoreJSON(url,timeoutMs=18000){
   const c=new AbortController(),t=setTimeout(()=>c.abort(),timeoutMs);
   try{const r=await fetch(url,{signal:c.signal,cache:'no-store'});if(!r.ok){const e=new Error(String(r.status));e.status=r.status;throw e;}return await r.json();}
+  finally{clearTimeout(t);}
+}
+async function fetchNoStoreText(url,timeoutMs=18000){
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),timeoutMs);
+  try{const r=await fetch(url,{signal:c.signal,cache:'no-store'});if(!r.ok){const e=new Error(String(r.status));e.status=r.status;throw e;}return await r.text();}
   finally{clearTimeout(t);}
 }
 
@@ -1458,7 +1673,8 @@ document.addEventListener('visibilitychange',()=>{
   if(document.hidden){newsBackgroundedAt=Date.now();return;}
   const age=Date.now()-(state.newsUpdatedAt||0);
   if(age>3*60e3||Date.now()-newsBackgroundedAt>3*60e3)refreshNewsOnly(true);
+  if(state.loaded&&latestCompletedRace()&&Date.now()-(state.standingsUpdatedAt||0)>5*60e3)refreshChampionshipOnly();
 });
-window.addEventListener('pageshow',()=>{if(state.loaded&&Date.now()-(state.newsUpdatedAt||0)>3*60e3)refreshNewsOnly(true);});
+window.addEventListener('pageshow',()=>{if(state.loaded&&Date.now()-(state.newsUpdatedAt||0)>3*60e3)refreshNewsOnly(true);if(state.loaded&&latestCompletedRace()&&Date.now()-(state.standingsUpdatedAt||0)>5*60e3)refreshChampionshipOnly();});
 setInterval(()=>{if(!document.hidden&&state.loaded&&Date.now()-(state.newsUpdatedAt||0)>10*60e3)refreshNewsOnly(true);},60e3);
 loadBase();

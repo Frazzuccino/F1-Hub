@@ -8,7 +8,7 @@ F1 Hub is an unofficial personal project and is not affiliated with Formula 1, t
 - Open-Meteo — weather forecast data.
 - BBC Sport Formula 1 RSS — news headlines; stories open at the publisher.
 - Autosport RSS — Formula 1 news headlines; stories open at the publisher.
-- Motorsport.com RSS — Formula 1 news headlines; stories open at the publisher.
+- Motorsport.com — Formula 1 news headlines plus a read-only current drivers’ standings fallback used when the primary championship API is delayed after a race.
 - RaceFans RSS — Formula 1 news headlines; stories open at the publisher.
 - The Race RSS — Formula 1 news headlines where its feed is reachable; stories open at the publisher.
 - rss2json — browser-side RSS-to-JSON transport.
@@ -27,3 +27,5 @@ F1 Hub is an unofficial personal project and is not affiliated with Formula 1, t
 The all-time F1 Records cards are bundled from publicly available Formula 1 career/team statistics and are current to the app release date; they are refreshed when F1 Hub itself is updated.
 
 No official Formula 1 logo or official Formula 1 typeface is included in the app.
+
+- Google News RSS — source-specific recent-news discovery fallback used when publisher RSS delivery is delayed; article links continue to the original publishers.

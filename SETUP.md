@@ -1,4 +1,4 @@
-# F1 Hub v1.11.6 — update / install
+# F1 Hub v1.11.8 — update / install
 
 ## Update GitHub Pages
 1. Replace the files in your existing F1 Hub GitHub Pages repository with everything in this folder.
@@ -6,12 +6,13 @@
 3. Commit the change and wait for GitHub Pages to redeploy.
 
 ## Force the latest version once
-Open your F1 Hub URL once with `?v=1116` on the end. In **More**, the footer should say **F1 Hub v1.11.6**.
+Open your F1 Hub URL once with `?v=1118` on the end. In **More**, the footer should say **F1 Hub v1.11.8**.
 
-## Changed in v1.11.6
-- News now reads each publisher RSS feed directly first rather than relying on rss2json as the primary source.
-- If browser CORS blocks a publisher feed, F1 Hub retries the same feed through a free CORS read-through; rss2json is now only the final fallback.
-- Reopening/resuming the Android app automatically checks for fresh news when the previous check is more than a few minutes old.
-- News refreshes automatically about every 10 minutes while F1 Hub is open.
-- The top refresh button and pull-to-refresh still force an immediate fresh-news check.
-- The v1.11.5 driver-photo fallback improvements, v1.11.1 telemetry/lap-delta fix, and removal of Live Timing are retained.
+## Changed in v1.11.8
+- Fixed post-race OpenF1 classifications where drivers with a null position (DNF/DNS/DSQ) were sorting ahead of P1.
+- Session Recap now chooses the winner and podium only from valid classified positions.
+- DNF/DNS/DSQ entries remain visible but are placed after classified finishers.
+- Championship standings now perform a no-cache post-race refresh and cross-check a separately published current standings table during the first 36 hours after a race.
+- If championship APIs are still one round behind, F1 Hub can apply the completed weekend points locally; an exact bundled Round 13 snapshot prevents the 2026 Italian GP standings from remaining stale if all upstream fallbacks are blocked.
+- Standings refresh when the app resumes after a completed race, as well as from the normal refresh button.
+- All v1.11.7 news improvements, driver-photo fixes and telemetry/lap-delta fixes are retained.

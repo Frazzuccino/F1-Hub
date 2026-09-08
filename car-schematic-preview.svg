@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="car-schematic car-schematic-v2" viewBox="0 0 1000 440" role="img" aria-label="Detailed Formula 1 car schematic showing 3 mapped update locations for Ferrari" style="--car-accent:#e8002d"><style>svg{background:#080808}.view-label{fill:#888;font:700 14px sans-serif}.car-body{fill:#181818;stroke:#777;stroke-width:2}.floor-shape,.floor-side{fill:#111;stroke:#555;stroke-width:2}.sidepod-shape{fill:#222;stroke:#888;stroke-width:2}.aero-surface,.rear-wing-element,.rear-wing-main,.diffuser-shape{fill:#161616;stroke:#e8002d;stroke-width:2}.endplate{fill:#111;stroke:#888;stroke-width:2}.tyre{fill:#020202;stroke:#888;stroke-width:2}.wheel-core{fill:#222;stroke:#888;stroke-width:2}.wheel-hub{fill:#555}.cockpit-shape{fill:#080808;stroke:#aaa;stroke-width:2}.halo-shape{fill:none;stroke:#bbb;stroke-width:3}.airbox,.engine-cover{fill:#181818;stroke:#777;stroke-width:2}.suspension,.nose-ridge,.floor-edge-line,.beam-wing-line{fill:none;stroke:#777;stroke-width:2}.car-highlight-line{fill:none;stroke:#e8002d;stroke-width:2;opacity:.5}.car-marker circle{fill:#e8002d;stroke:#fff;stroke-width:2}.car-marker text{fill:#fff;font:700 10px sans-serif;text-anchor:middle}</style>
+    <defs><linearGradient id="carBody-ferrari" x1="0" x2="1"><stop offset="0" stop-color="#151515"/><stop offset=".55" stop-color="#222"/><stop offset="1" stop-color="#111"/></linearGradient></defs>
+    <g class="car-view top-view">
+      <text class="view-label" x="32" y="25">TOP VIEW</text>
+      <!-- front wing / nose -->
+      <path class="aero-surface front-wing-element" d="M42 101 Q88 80 166 88 L184 102 L184 138 L166 152 Q88 160 42 139 Z"/>
+      <rect class="endplate" x="37" y="83" width="13" height="74" rx="3"/><rect class="endplate" x="176" y="90" width="10" height="60" rx="3"/>
+      <path class="car-body" d="M168 112 L254 104 L345 96 L395 103 L395 137 L345 144 L254 136 L168 128 Z"/>
+      <path class="nose-ridge" d="M174 120 H347"/>
+      <!-- front wheels and suspension -->
+      <rect class="tyre tyre-top" x="270" y="43" width="69" height="48" rx="12"/><rect class="tyre tyre-top" x="270" y="149" width="69" height="48" rx="12"/>
+      <path class="suspension" d="M300 91 L354 111 M300 149 L354 129 M329 91 L368 110 M329 149 L368 130"/>
+      <!-- floor, sidepods, cockpit -->
+      <path class="floor-shape" d="M350 83 L420 65 L614 57 L700 76 L748 97 L820 105 L820 135 L748 143 L700 164 L614 183 L420 174 L350 157 Z"/>
+      <path class="sidepod-shape" d="M397 88 Q444 72 520 72 L610 83 L650 105 L650 135 L610 157 L520 168 Q444 168 397 152 Z"/>
+      <path class="cockpit-shape" d="M425 104 Q458 73 500 87 Q534 99 551 120 Q534 142 500 153 Q458 166 425 136 Z"/>
+      <path class="halo-shape" d="M454 104 Q482 86 510 104 L530 120 M454 136 Q482 154 510 136"/>
+      <path class="airbox" d="M518 92 L550 102 L558 120 L550 138 L518 148 Z"/>
+      <path class="floor-edge-line" d="M374 159 Q505 186 694 155"/>
+      <!-- rear suspension / wheels / diffuser / wing -->
+      <rect class="tyre tyre-top" x="727" y="35" width="82" height="55" rx="13"/><rect class="tyre tyre-top" x="727" y="150" width="82" height="55" rx="13"/>
+      <path class="suspension" d="M690 96 L754 90 M690 144 L754 150 M706 106 L778 90 M706 134 L778 150"/>
+      <path class="rear-body" d="M645 102 L720 96 L850 105 L868 119 L850 135 L720 144 L645 138 Z"/>
+      <path class="diffuser-shape" d="M796 104 L862 92 L879 103 L879 137 L862 148 L796 136 Z"/>
+      <rect class="rear-wing-element" x="866" y="75" width="96" height="90" rx="5"/><rect class="rear-wing-main" x="854" y="91" width="112" height="15" rx="4"/><rect class="rear-wing-main" x="854" y="134" width="112" height="15" rx="4"/>
+      <path class="car-highlight-line" d="M52 120 H180 M354 82 Q560 46 817 104 M817 136 Q560 194 354 158 M860 120 H958"/>
+    </g>
+    <g class="car-view side-view">
+      <text class="view-label" x="32" y="235">SIDE VIEW</text>
+      <!-- floor and front wing -->
+      <path class="floor-side" d="M165 370 H843 L861 380 H163 Z"/>
+      <path class="aero-surface front-wing-side" d="M45 351 L160 342 L183 350 L177 363 L48 368 Z"/><rect class="endplate" x="44" y="326" width="12" height="44" rx="3"/>
+      <!-- wheels -->
+      <circle class="tyre" cx="282" cy="347" r="45"/><circle class="wheel-core" cx="282" cy="347" r="20"/><circle class="wheel-hub" cx="282" cy="347" r="7"/>
+      <circle class="tyre" cx="773" cy="345" r="48"/><circle class="wheel-core" cx="773" cy="345" r="21"/><circle class="wheel-hub" cx="773" cy="345" r="7"/>
+      <!-- chassis -->
+      <path class="car-body" d="M150 344 L215 327 L337 318 L386 296 L459 284 L548 282 L604 294 L655 300 L711 304 L737 318 L735 355 L326 358 L208 355 Z"/>
+      <path class="sidepod-shape" d="M457 304 Q520 288 608 300 L650 318 L631 350 H430 L418 330 Z"/>
+      <path class="nose-ridge" d="M154 342 Q247 326 365 321"/>
+      <path class="cockpit-shape" d="M420 301 Q453 253 510 259 Q545 263 568 287 L551 308 L443 313 Z"/>
+      <path class="halo-shape" d="M444 294 Q468 250 509 265 Q531 273 541 294 M480 265 V302"/>
+      <path class="airbox" d="M523 263 L554 238 L586 251 L599 289 L555 290 Z"/>
+      <path class="engine-cover" d="M568 271 Q643 263 722 302 L731 326 L650 326 L611 301 Z"/>
+      <path class="suspension" d="M236 324 L282 303 M236 354 L282 391 M704 316 L773 297 M704 352 L773 393"/>
+      <!-- rear aero -->
+      <path class="diffuser-shape" d="M718 354 L842 352 L858 375 L801 379 L742 370 Z"/>
+      <rect class="rear-wing-element" x="868" y="251" width="19" height="112" rx="4"/><path class="rear-wing-main" d="M821 260 H952 L946 276 H830 Z"/><path class="rear-wing-main" d="M836 287 H950 L946 302 H842 Z"/>
+      <path class="beam-wing-line" d="M808 320 Q850 305 892 312"/>
+      <path class="car-highlight-line" d="M51 358 Q201 340 368 319 Q529 274 712 309 M326 360 H842"/>
+    </g><g class="car-marker " role="button" tabindex="0" onclick="focusCarUpdate('car-ferrari-1')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();focusCarUpdate('car-ferrari-1')}"><title>1. Front Wing — Front wing</title><circle cx="95" cy="110" r="13"></circle><text x="95" y="114">1</text></g><g class="car-marker side-marker" role="button" tabindex="0" onclick="focusCarUpdate('car-ferrari-1')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();focusCarUpdate('car-ferrari-1')}"><title>1. Front Wing — Front wing</title><circle cx="93" cy="354.5" r="13"></circle><text x="93" y="358.5">1</text></g><g class="car-marker " role="button" tabindex="0" onclick="focusCarUpdate('car-ferrari-2')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();focusCarUpdate('car-ferrari-2')}"><title>2. Floor Edge — Floor / floor edge</title><circle cx="550" cy="156" r="13"></circle><text x="550" y="160">2</text></g><g class="car-marker side-marker" role="button" tabindex="0" onclick="focusCarUpdate('car-ferrari-2')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();focusCarUpdate('car-ferrari-2')}"><title>2. Floor Edge — Floor / floor edge</title><circle cx="580" cy="359.5" r="13"></circle><text x="580" y="363.5">2</text></g><g class="car-marker " role="button" tabindex="0" onclick="focusCarUpdate('car-ferrari-3')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();focusCarUpdate('car-ferrari-3')}"><title>3. Rear Wing — Rear wing</title><circle cx="902" cy="110" r="13"></circle><text x="902" y="114">3</text></g><g class="car-marker side-marker" role="button" tabindex="0" onclick="focusCarUpdate('car-ferrari-3')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();focusCarUpdate('car-ferrari-3')}"><title>3. Rear Wing — Rear wing</title><circle cx="895" cy="275.5" r="13"></circle><text x="895" y="279.5">3</text></g>
+  </svg>

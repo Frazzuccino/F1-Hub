@@ -1,66 +1,53 @@
-# F1 Hub v1.14.0 — Quality Report
+# F1 Hub v1.15.0 — Quality Report
 
-## Release rating
+## Release result
 
-**Subjective product rating: 9.5/10**
+**Overall product rating: 9.6/10**
 
-The automated release gate is intentionally stricter and binary for known regressions; all checks pass. The product rating remains below 10 because the app still depends on third-party public data sources whose availability, latency and document formatting are outside the app's control.
+**Automated release gate: 113/113 passed — 10.00/10**
 
-## Automated quality gate
+### Automated categories
 
-```text
-F1 HUB QUALITY TESTS: 98/98 passed
+| Category | Passed |
+|---|---:|
+| Data | 12/12 |
+| Reliability | 17/17 |
+| Features | 41/41 |
+| PWA | 5/5 |
+| UX | 19/19 |
+| Accessibility | 7/7 |
+| Performance | 11/11 |
+| Test framework | 1/1 |
 
-data           10/10
-reliability    16/16
-features       37/37
-tests           1/1
-pwa             5/5
-ux             14/14
-accessibility   6/6
-performance     9/9
+Runtime/browser-like smoke test: **PASS**
 
-TEST SCORE: 10.00/10
-```
+JavaScript syntax checks: **PASS**
 
-## Runtime smoke test
+Car Development visual snapshot render: **PASS**
 
-**PASS**
+## Important regressions covered
 
-The app script is executed inside the release's browser-like runtime harness. The smoke test covers:
-- DNF ordering;
-- parent route behaviour;
-- FIA table-format parsing;
-- flattened FIA parsing with all 11 current-team sections represented;
-- explicit no-update handling;
-- Car Development schematic generation;
-- neutral standings despite favourites;
-- My F1 theming;
-- driver career aggregation including a mid-season team change;
-- left/right swipe-route calculation;
-- upcoming weather-session selection;
-- rendered Race Calendar, More hierarchy, Standings, News and Weather markup.
+- DNF/DNS/DSQ rows cannot outrank classified finishers.
+- A result must contain a real unique P1 before a winner is shown.
+- Post-race standings validation/reconstruction remains enabled.
+- FIA Car Presentation documents support both table and flattened-text extraction.
+- Driver careers paginate beyond Jolpica's 100-result response cap.
+- A 393-race synthetic career fixture produces 393 GPs, 106 wins and 207 podiums without truncation.
+- Mid-season constructor changes remain represented in career history.
+- Car update markers map against the new detailed top/side car geometry.
+- Swipe navigation uses direct movement plus distance/velocity commit logic.
+- My F1 is not rendered on Home.
+- Launch animation uses next/live race-weekend context and honours reduced motion.
+- News, weather, standings, update checking, PWA caching and existing v1.14 features remain under regression coverage.
 
-During this final render-level pass, the test uncovered a missing `sessionRows()` renderer introduced during the refactor. That was restored before release and a permanent regression test was added.
+## Visual QA
 
-## Car Development validation
+The new car silhouette was rendered independently from the app SVG generator and inspected at `tests/car-schematic-preview.png`. It now visibly reads as an open-wheel Formula 1 car in both top and side views rather than the previous rectangular schematic.
 
-The flat-document fixture follows the structure of the current FIA Car Presentation Submission rather than a synthetic Markdown table only. It verifies that:
-- McLaren, Mercedes, Red Bull Racing, Ferrari, Williams, Racing Bulls, Aston Martin, Haas, Alpine and Cadillac retain update rows;
-- Audi remains visible as the explicit no-update team;
-- no detected team is silently discarded;
-- parse failures are surfaced as **CHECK DOC** rather than mislabelled as zero updates.
+## Browser limitation
 
-## Additional release checks
+A Chromium end-to-end screenshot run was attempted in the build environment, but headless Chromium did not complete navigation within the execution window. It is therefore **not counted** as a passed browser test. The browser-like runtime suite is counted and passed.
 
-- `app.js` syntax: PASS
-- `car-development-core.js` syntax: PASS
-- `manifest.json`: PASS
-- `version.json`: PASS
-- Service-worker release version/assets: PASS via regression suite
-- Reduced-motion/accessibility gates: PASS
-- App JS size gate (<230 KB): PASS
+## Why the product score is 9.6 rather than 10
 
-## Environment limitation
-
-A separate full headless-Chromium navigation test was attempted, but this execution environment blocks Chromium page navigation with `ERR_BLOCKED_BY_ADMINISTRATOR`, including `data:` and local-file pages. It is therefore not counted as a successful browser E2E test. The release instead uses the passing runtime/render smoke suite above plus the static/regression gates. A real Android/PWA smoke test after GitHub Pages deployment remains the final device-specific verification.
+F1 Hub still depends on public services such as Jolpica, OpenF1, FIA pages, news feeds and weather data. The app validates, caches and exposes failures more safely, but it cannot guarantee those providers' uptime or freshness. Real-device swipe feel is also ultimately best verified on the target Android phone.

@@ -22,9 +22,10 @@ const JINA = 'https://r.jina.ai/';
 const MOTORSPORT_STANDINGS = `https://www.motorsport.com/f1/standings/${YEAR}/`;
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const APP_VERSION = '1.14.0';
+const APP_VERSION = '1.15.0';
 const Q = globalThis.F1HubQuality;
 const CD = globalThis.F1HubCarDevelopment;
+const CAREER = globalThis.F1HubDriverCareer;
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -151,27 +152,6 @@ function healthIcon(rec){const st=healthState(rec);return st==='fresh'?'✓':st=
 function currentDataHealthScore(){const vals=Object.values(state.dataHealth);if(!vals.length)return 0;return Math.round(vals.reduce((a,r)=>a+(Q?.freshness(r.updatedAt,r.maxAgeMs)?.score||20),0)/vals.length);}
 function saveFavourite(kind,value){if(kind==='driver'){state.favouriteDriver=value;localStorage.setItem('f1hub:favourite-driver',value||'');}else{state.favouriteTeam=value;localStorage.setItem('f1hub:favourite-team',value||'');}render();toast('Preferences saved');}
 function favouriteDriverStanding(){return state.drivers.find(s=>s.Driver.driverId===state.favouriteDriver)||null;}
-function favouriteCard(){
-  const s=favouriteDriverStanding(),teamName=favouriteTeamName(),teamStanding=favouriteTeamStanding();
-  if(!s&&!teamStanding)return `<div class="card favourite-card"><div class="eyebrow">MY F1</div><div class="card-title">Make F1 Hub yours</div><div class="muted">Choose a favourite driver and team to personalise the Home card and optionally theme the app in your team colours.</div><div class="spacer"></div><button class="external-btn red" onclick="setRoute('preferences')">SET UP MY F1</button></div>`;
-  const leader=state.drivers[0],gap=s?Math.max(0,Number(leader?.points||0)-Number(s.points||0)):0;
-  const driverTeam=s?.Constructors?.at(-1)?.name||teamName;
-  const mate=s?state.drivers.find(x=>x.Driver.driverId!==s.Driver.driverId&&(x.Constructors?.at(-1)?.name||'')===driverTeam):null;
-  const mateGap=s&&mate?Number(s.points||0)-Number(mate.points||0):null;
-  const myNews=myF1News()[0];
-  return `<div class="card favourite-card my-f1-card" style="--team-accent:${teamColour(teamName||driverTeam)};border-left:5px solid var(--team-accent)">
-    <div class="my-f1-top"><div><div class="eyebrow">MY F1${teamName?` · ${esc(teamName)}`:''}</div><div class="card-title">${s?esc(fullName(s.Driver)):esc(teamName)}</div></div><button class="mini-btn" onclick="setRoute('preferences')" aria-label="Change My F1 preferences">⚙</button></div>
-    <div class="my-f1-grid">
-      ${s?`<div><small>DRIVER</small><b>P${esc(s.position)} · ${esc(s.points)} pts</b><span>${Number(s.position)===1?'Championship leader':`${gap} pts off lead`}</span></div>`:''}
-      ${teamStanding?`<div><small>TEAM</small><b>P${esc(teamStanding.position)} · ${esc(teamStanding.points)} pts</b><span>${esc(teamStanding.wins)} wins</span></div>`:''}
-      ${mate?`<div><small>TEAM-MATE</small><b>${mateGap>=0?'+':''}${mateGap} pts</b><span>vs ${esc(mate.Driver.familyName)}</span></div>`:''}
-      <div><small>THEME</small><b>${state.personalTheme&&teamName?'ON':'OFF'}</b><span>${state.personalTheme&&teamName?esc(teamName):'F1 red'}</span></div>
-    </div>
-    ${myNews?`<a class="my-f1-news" href="${esc(myNews.link)}" target="_blank" rel="noopener"><small>RELEVANT STORY</small><b>${esc(myNews.title)}</b><span>${esc((myNews.source||'F1').toUpperCase())} · ${fmtNewsTime(myNews.pubDate)}</span></a>`:''}
-    <div class="spacer"></div><div class="actions">${s?`<button class="external-btn" onclick="setRoute('driver:${esc(s.Driver.driverId)}')">DRIVER PROFILE</button>`:''}<button class="external-btn" onclick="setRoute('standings')">CHAMPIONSHIP</button></div>
-  </div>`;
-}
-
 function freshnessStrip(){
   const items=[['Schedule',state.dataHealth.schedule],['Standings',state.dataHealth.standings],['News',state.dataHealth.news]];
   return `<button class="freshness-strip" onclick="setRoute('datahealth')" aria-label="Open data health">${items.map(([n,r])=>`<span class="health-${healthState(r)}"><b>${healthIcon(r)}</b>${esc(n)}</span>`).join('')}<small>DATA HEALTH ›</small></button>`;
@@ -458,7 +438,7 @@ async function loadBase(force=false){
     ]);
     if(sched.status==='fulfilled'){
       const rows=sched.value?.MRData?.RaceTable?.Races||[];
-      if(rows.length>=10){state.schedule=rows;markHealth('schedule','ok','Jolpica',Date.now(),`${rows.length} rounds`,0,60*60e3);}else if(!state.schedule.length)markHealth('schedule','error','Jolpica',Date.now(),'Calendar response failed validation',0,60*60e3);
+      if(rows.length>=10){state.schedule=rows;markHealth('schedule','ok','Jolpica',Date.now(),`${rows.length} rounds`,0,60*60e3);updateLaunchContent();}else if(!state.schedule.length)markHealth('schedule','error','Jolpica',Date.now(),'Calendar response failed validation',0,60*60e3);
     }else if(!state.schedule.length)markHealth('schedule','error','Jolpica',Date.now(),'Calendar request failed',0,60*60e3);
     if(ds.status==='fulfilled'){
       const table=ds.value?.MRData?.StandingsTable||{};
@@ -683,6 +663,7 @@ function parseReprimands(text){
 }
 
 const TOP_LEVEL_ROUTES=['home','races','standings','news','more'];
+const SWIPE_META={home:['⌂','HOME'],races:['▦','RACES'],standings:['🏆','STANDINGS'],news:['◫','NEWS'],more:['☰','MORE']};
 function parentNav(route){ if(TOP_LEVEL_ROUTES.includes(route))return route; if(route.startsWith('race:')||route.startsWith('session:')||route.startsWith('telemetry:')||route.startsWith('carupdates:')||route.startsWith('circuit:')||route.startsWith('radar:'))return 'races'; return 'more'; }
 function swipeTarget(route,dx){const i=TOP_LEVEL_ROUTES.indexOf(route);if(i<0)return null;const n=i+(dx<0?1:-1);return n>=0&&n<TOP_LEVEL_ROUTES.length?TOP_LEVEL_ROUTES[n]:null;}
 function animateRouteContent(direction=state.routeMotionDirection){
@@ -743,8 +724,6 @@ function renderHome(){
       <h1>${esc(r.raceName.toUpperCase())}</h1><div class="circuit">${esc(r.Circuit.circuitName)} · ${esc(r.Circuit.Location.locality)}</div>
       ${ns?`<div class="next-session"><div class="label">NEXT SESSION</div><div class="name">${esc(ns.name)}</div><div class="time">${fmtDateTime(ns.iso)} · UK</div></div>${countdownHtml(ns.iso)}`:`<div class="next-session"><div class="name">Race weekend complete</div></div>`}
     </section>
-    ${favouriteCard()}
-    <div class="spacer"></div>
     <div class="grid desktop-two"><div>
       ${titleBlock('WEEKEND','Schedule')}<div class="schedule-list">${sessionRows(r)}</div>
       <div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="setRoute('race:${r.round}')">RACE HUB</button><button class="external-btn" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button></div>
@@ -863,7 +842,7 @@ function renderPreferences(){
   const teamOpts=['<option value="">No favourite team</option>',...teams.map(t=>`<option value="${esc(t)}" ${state.favouriteTeam===t?'selected':''}>${esc(t)}</option>`)].join('');
   const r=currentRace(),activeTeam=favouriteTeamName();
   view.innerHTML=titleBlock('PERSONALISE','My F1')+`<div class="card preferences-card"><label><div class="eyebrow">FAVOURITE DRIVER</div><select id="fav-driver">${driverOpts}</select></label><label><div class="eyebrow">FAVOURITE TEAM</div><select id="fav-team">${teamOpts}</select></label><label class="theme-choice"><span><div class="eyebrow">PERSONAL THEME</div><b>Use my team colours throughout F1 Hub</b><small>Changes the app accent/theme while keeping status colours meaningful.</small></span><input id="fav-theme" type="checkbox" ${state.personalTheme?'checked':''} aria-label="Use favourite team theme"></label><div class="theme-preview" style="--preview:${teamColour(activeTeam)}"><i></i><span>${activeTeam?`${esc(activeTeam)} theme`:'Choose a team or driver to preview a theme'}</span></div><div class="spacer"></div><button id="save-favourites" class="external-btn red">SAVE MY F1</button></div>
-  <div class="spacer"></div><div class="card my-f1-benefits"><div class="eyebrow">WHAT MY F1 CHANGES</div><div class="benefit-grid"><div><b>🎨 Theme</b><span>Your chosen team colours can style the whole app.</span></div><div><b>⌂ Home</b><span>Driver, team and team-mate context in one card.</span></div><div><b>🛠 Development</b><span>Your team is surfaced first in car updates.</span></div><div><b>⚙ Quick access</b><span>Jump straight to your driver profile and championship context.</span></div></div></div>
+  <div class="spacer"></div><div class="card my-f1-benefits"><div class="eyebrow">WHAT MY F1 CHANGES</div><div class="benefit-grid"><div><b>🎨 Theme</b><span>Your chosen team colours can style the whole app.</span></div><div><b>👤 Driver</b><span>Your favourite driver stays one tap away from My F1.</span></div><div><b>🛠 Development</b><span>Your team is surfaced first in car updates.</span></div><div><b>⚙ Quick access</b><span>Jump straight to your driver profile and championship context.</span></div></div></div>
   ${r?`<div class="spacer"></div><div class="card"><div class="eyebrow">RACE-WEEKEND SHORTCUT</div><div class="card-title">Add ${esc(r.raceName)} to your calendar</div><div class="muted">Creates one .ics file containing every session in the weekend.</div><div class="spacer"></div><button class="external-btn" onclick="addRaceWeekendCalendar('${esc(r.round)}')">ADD WEEKEND TO CALENDAR</button></div>`:''}<div class="spacer"></div>${spoilerSettingsCard()}`;
   const preview=()=>{const team=document.getElementById('fav-team').value||state.drivers.find(x=>x.Driver.driverId===document.getElementById('fav-driver').value)?.Constructors?.at(-1)?.name||'';const el=document.querySelector('.theme-preview');if(el){el.style.setProperty('--preview',teamColour(team));el.querySelector('span').textContent=team?`${team} theme`:'Choose a team or driver to preview a theme';}};
   document.getElementById('fav-driver').addEventListener('change',preview);document.getElementById('fav-team').addEventListener('change',preview);
@@ -879,21 +858,28 @@ window.addRaceWeekendCalendar=addRaceWeekendCalendar;window.shareText=shareText;
 
 function renderDrivers(){ view.innerHTML=titleBlock(`${YEAR} GRID`,'Drivers')+`<div class="driver-grid">${state.drivers.map(s=>driverCard(s)).join('')}</div>`; }
 function driverCard(s){ const team=s.Constructors?.at(-1)?.name||'',imgs=driverPhotoUrls(s),img=imgs[0],fb=imgs[1]||'';return `<div class="card driver-card clickable ${isFavouriteDriver(s)?'is-favourite':''}" onclick="setRoute('driver:${s.Driver.driverId}')"><i class="team-strip" style="background:${teamColour(team)}"></i><div class="driver-photo-holder">${img?`<img class="driver-photo" src="${esc(img)}" data-fallback="${esc(fb)}" data-code="${esc(driverCode(s.Driver))}" onerror="driverPhotoError(this)" alt="${esc(fullName(s.Driver))}" loading="lazy">`:`<div class="avatar">${esc(driverCode(s.Driver))}</div>`}</div><div class="driver-copy"><div class="driver-code">#${esc(s.Driver.permanentNumber||'—')} · ${esc(driverCode(s.Driver))}</div><div class="driver-full">${esc(fullName(s.Driver))}</div><div class="driver-bottom"><span>${esc(team)}</span><span><b>${esc(s.points)}</b> pts</span></div></div></div>`; }
-function buildDriverCareer(races){
-  const rows=(races||[]).slice().sort((a,b)=>Number(a.season)-Number(b.season)||Number(a.round)-Number(b.round));
-  const seasons=new Map(),teams=new Map();let wins=0,podiums=0,best=Infinity;
-  for(const race of rows){const res=race.Results?.[0];if(!res)continue;const season=Number(race.season),team=res.Constructor?.name||'Unknown';const pos=Number(res.position);if(pos===1)wins++;if(pos>0&&pos<=3)podiums++;if(pos>0)best=Math.min(best,pos);
-    if(!seasons.has(season))seasons.set(season,{season,starts:0,wins:0,podiums:0,teams:[]});const s=seasons.get(season);s.starts++;if(pos===1)s.wins++;if(pos>0&&pos<=3)s.podiums++;if(!s.teams.includes(team))s.teams.push(team);
-    if(!teams.has(team))teams.set(team,{team,first:season,last:season,starts:0});const q=teams.get(team);q.first=Math.min(q.first,season);q.last=Math.max(q.last,season);q.starts++;
-  }
-  return {starts:rows.length,wins,podiums,best:Number.isFinite(best)?best:null,debut:rows[0]||null,last:rows.at(-1)||null,seasons:[...seasons.values()].sort((a,b)=>b.season-a.season),teams:[...teams.values()].sort((a,b)=>a.first-b.first||a.team.localeCompare(b.team))};
-}
+function careerPageOffsets(total,pageSize=100){return CAREER?.pageOffsets(total,pageSize)||[0];}
+function buildDriverCareer(races,expectedTotal=0){return CAREER?.build(races,expectedTotal)||{starts:0,wins:0,podiums:0,best:null,seasons:[],teams:[],expectedTotal:Number(expectedTotal||0),complete:false};}
 function careerSpan(x){return x.first===x.last?String(x.first):`${x.first}–${x.last}`;}
 function driverCareerHtml(c){
   if(!c||!c.starts)return '<div class="card"><div class="empty">Career history is not available for this driver yet.</div></div>';
-  return `<div class="career-summary card"><div class="eyebrow">F1 CAREER</div><div class="facts career-facts"><div class="fact"><b>${c.starts}</b><small>STARTS</small></div><div class="fact"><b>${c.wins}</b><small>WINS</small></div><div class="fact"><b>${c.podiums}</b><small>PODIUMS</small></div><div class="fact"><b>${c.best?`P${c.best}`:'—'}</b><small>BEST FINISH</small></div></div></div><div class="spacer"></div><div class="card"><div class="eyebrow">TEAM HISTORY</div><div class="career-team-timeline">${c.teams.map(x=>`<div class="career-team-row"><i style="background:${teamColour(x.team)}"></i><div><b>${esc(x.team)}</b><span>${careerSpan(x)} · ${x.starts} starts</span></div></div>`).join('')}</div></div><div class="spacer"></div><div class="card"><div class="eyebrow">SEASON BY SEASON</div><div class="career-seasons">${c.seasons.map(x=>`<div class="career-season-row"><b>${x.season}</b><div><strong>${esc(x.teams.join(' → '))}</strong><span>${x.starts} starts · ${x.wins} win${x.wins===1?'':'s'} · ${x.podiums} podium${x.podiums===1?'':'s'}</span></div></div>`).join('')}</div></div><div class="source-note">Career history is built from the Jolpica/Ergast race-results archive, so mid-season team changes appear in the relevant season.</div>`;
+  return `<div class="career-summary card"><div class="eyebrow">F1 CAREER</div><div class="facts career-facts"><div class="fact"><b>${c.starts}</b><small>GRANDS PRIX</small></div><div class="fact"><b>${c.wins}</b><small>WINS</small></div><div class="fact"><b>${c.podiums}</b><small>PODIUMS</small></div><div class="fact"><b>${c.best?`P${c.best}`:'—'}</b><small>BEST FINISH</small></div></div>${!c.complete?`<div class="career-warning">Archive incomplete · ${c.starts}/${c.expectedTotal} races loaded</div>`:''}</div><div class="spacer"></div><div class="card"><div class="eyebrow">TEAM HISTORY</div><div class="career-team-timeline">${c.teams.map(x=>`<div class="career-team-row"><i style="background:${teamColour(x.team)}"></i><div><b>${esc(x.team)}</b><span>${careerSpan(x)} · ${x.starts} Grands Prix</span></div></div>`).join('')}</div></div><div class="spacer"></div><div class="card"><div class="eyebrow">SEASON BY SEASON</div><div class="career-seasons">${c.seasons.map(x=>`<div class="career-season-row"><b>${x.season}</b><div><strong>${esc(x.teams.join(' → '))}</strong><span>${x.starts} GP${x.starts===1?'':'s'} · ${x.wins} win${x.wins===1?'':'s'} · ${x.podiums} podium${x.podiums===1?'':'s'}</span></div></div>`).join('')}</div></div><div class="source-note">Career history is built from every paginated Jolpica/Ergast Grand Prix result for the driver. Jolpica limits each response to 100 records, so F1 Hub follows MRData.total and requests every offset before calculating these totals.</div>`;
 }
-async function loadDriverCareerInto(id){const root=document.getElementById('driver-career');if(!root)return;try{let career=state.driverCareerCache[id];if(!career){const j=await fetchJSON(`${JOLPICA}/drivers/${encodeURIComponent(id)}/results/?limit=2000`,`driver-career-${id}`,30*864e5,22000);career=buildDriverCareer(j?.MRData?.RaceTable?.Races||[]);state.driverCareerCache[id]=career;}if(document.getElementById('driver-career'))root.innerHTML=driverCareerHtml(career);}catch{if(document.getElementById('driver-career'))root.innerHTML='<div class="card"><div class="empty">Career history could not be loaded right now.</div></div>';}}
+async function fetchAllDriverCareerRaces(id){
+  const pageSize=100,driver=encodeURIComponent(id),maxAge=30*60e3;
+  const fetchPage=offset=>fetchJSON(`${JOLPICA}/drivers/${driver}/results/?limit=${pageSize}&offset=${offset}`,`driver-career-v2-${id}-${offset}`,maxAge,22000);
+  const first=await fetchPage(0),total=Number(first?.MRData?.total||0),firstRows=first?.MRData?.RaceTable?.Races||[];
+  const offsets=careerPageOffsets(total,pageSize).filter(x=>x!==0);
+  const pages=await Promise.allSettled(offsets.map(fetchPage));
+  const rows=[...firstRows];
+  for(const p of pages)if(p.status==='fulfilled')rows.push(...(p.value?.MRData?.RaceTable?.Races||[]));
+  return {races:rows,total};
+}
+async function loadDriverCareerInto(id){
+  const root=document.getElementById('driver-career');if(!root)return;
+  try{let career=state.driverCareerCache[id];if(!career){const all=await fetchAllDriverCareerRaces(id);career=buildDriverCareer(all.races,all.total);state.driverCareerCache[id]=career;}if(document.getElementById('driver-career'))root.innerHTML=driverCareerHtml(career);}
+  catch{if(document.getElementById('driver-career'))root.innerHTML='<div class="card"><div class="empty">Career history could not be loaded right now.</div></div>';}
+}
 function renderDriver(id){ const s=state.drivers.find(x=>x.Driver.driverId===id);if(!s)return setRoute('drivers');const d=s.Driver,team=s.Constructors?.at(-1)?.name||'',imgs=driverPhotoUrls(s),img=imgs[0],fb=imgs[1]||'';view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('drivers')">← DRIVERS</button></div><div class="spacer"></div><div class="card driver-profile-card" style="overflow:hidden"><div class="driver-profile-hero" style="border-left-color:${teamColour(team)}"><div class="driver-profile-copy"><div class="eyebrow">#${esc(d.permanentNumber||'—')} · ${esc(driverCode(d))}</div><h1>${esc(fullName(d))}</h1><div class="muted">${esc(d.nationality)} · ${esc(team)}</div></div><div class="profile-photo-holder">${img?`<img src="${esc(img)}" data-fallback="${esc(fb)}" data-code="${esc(driverCode(d))}" onerror="driverPhotoError(this)" alt="${esc(fullName(d))}">`:`<div class="avatar profile-avatar">${esc(driverCode(d))}</div>`}</div></div><div class="driver-profile-stats"><div class="facts"><div class="fact"><b>${esc(s.position)}</b><small>CHAMP POS</small></div><div class="fact"><b>${esc(s.points)}</b><small>POINTS</small></div><div class="fact"><b>${esc(s.wins)}</b><small>${YEAR} WINS</small></div><div class="fact"><b>${age(d.dateOfBirth)}</b><small>AGE</small></div><div class="fact"><b>${fmtDate(d.dateOfBirth+'T12:00:00Z',{day:'numeric',month:'short',year:'numeric'})}</b><small>BORN</small></div><div class="fact"><b>${esc(d.nationality)}</b><small>NATIONALITY</small></div></div></div></div><div class="spacer"></div>${titleBlock('HISTORY','Career')}<div id="driver-career"><div class="loader">Loading F1 career…</div></div><div class="spacer"></div><div class="actions"><a class="external-btn" href="${esc(d.url||'#')}" target="_blank" rel="noopener">PROFILE SOURCE ↗</a></div>`;loadDriverCareerInto(id); }
 
 function renderTeams(){ view.innerHTML=titleBlock(`${YEAR} GRID`,'Teams')+`<div class="grid two">${state.constructors.map(c=>`<div class="card ${isFavouriteTeamName(c.Constructor.name)?'is-favourite':''}" style="border-left:5px solid ${teamColour(c.Constructor.name)}"><div class="eyebrow">P${esc(c.position)}</div><div class="card-title" style="font-size:20px;margin-top:5px">${esc(c.Constructor.name)}</div><div class="stat-big">${esc(c.points)} <span class="muted" style="font-size:11px">PTS</span></div><div class="muted">${esc(c.wins)} wins · ${esc(c.Constructor.nationality||'')}</div></div>`).join('')}</div>`; }
@@ -1253,30 +1239,66 @@ function carSchematicSvg(team,updates){
   const mapped=CD?.mapUpdates(updates)||updates.map((u,i)=>({...u,map:{id:'unmapped',label:'Location not mapped',confidence:'LOW'},mapIndex:i+1}));
   const accent=teamColour(team),seen={};
   const markers=mapped.flatMap(u=>(u.maps?.length?u.maps:[u.map]).filter(z=>z?.top||z?.side).map(z=>({u,z}))).map(({u,z})=>{
-    const id=z.id,slot=seen[id]||0;seen[id]=slot+1;const d=(slot%3-1)*9;
-    const ref=`car-${carTeamSlug(team)}-${u.mapIndex}`;const title=`${u.mapIndex}. ${u.component} — ${z.label}`;
-    const one=(pt,side=false)=>pt?`<g class="car-marker ${side?'side-marker':''}" role="button" tabindex="0" onclick="focusCarUpdate('${ref}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();focusCarUpdate('${ref}')}"><title>${esc(title)}</title><circle cx="${pt[0]+d}" cy="${pt[1]+(side?d/3:d)}" r="12"></circle><text x="${pt[0]+d}" y="${pt[1]+(side?d/3:d)+4}">${u.mapIndex}</text></g>`:'';
+    const id=z.id,slot=seen[id]||0;seen[id]=slot+1;const d=(slot%3-1)*10;
+    const ref=`car-${carTeamSlug(team)}-${u.mapIndex}`,title=`${u.mapIndex}. ${u.component} — ${z.label}`;
+    const one=(pt,side=false)=>pt?`<g class="car-marker ${side?'side-marker':''}" role="button" tabindex="0" onclick="focusCarUpdate('${ref}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();focusCarUpdate('${ref}')}"><title>${esc(title)}</title><circle cx="${pt[0]+d}" cy="${pt[1]+(side?d/4:d)}" r="13"></circle><text x="${pt[0]+d}" y="${pt[1]+(side?d/4:d)+4}">${u.mapIndex}</text></g>`:'';
     return one(z.top)+one(z.side,true);
   }).join('');
-  return `<svg class="car-schematic" viewBox="0 72 900 155" role="img" aria-label="Schematic Formula 1 car showing ${mapped.filter(x=>x.maps?.length||x.map.id!=='unmapped').length} mapped update locations for ${esc(team)}" style="--car-accent:${accent}">
+  return `<svg class="car-schematic car-schematic-v2" viewBox="0 0 1000 440" role="img" aria-label="Detailed Formula 1 car schematic showing ${mapped.filter(x=>x.maps?.length||x.map.id!=='unmapped').length} mapped update locations for ${esc(team)}" style="--car-accent:${accent}">
+    <defs><linearGradient id="carBody-${carTeamSlug(team)}" x1="0" x2="1"><stop offset="0" stop-color="#151515"/><stop offset=".55" stop-color="#222"/><stop offset="1" stop-color="#111"/></linearGradient></defs>
     <g class="car-view top-view">
-      <text class="view-label" x="58" y="88">TOP VIEW</text>
-      <rect class="car-part" x="58" y="141" width="61" height="34" rx="6"/><path class="car-part" d="M112 151 L181 141 L224 126 L395 126 L453 143 L514 146 L514 170 L453 173 L395 190 L224 190 L181 175 L112 165 Z"/>
-      <rect class="car-part" x="497" y="132" width="42" height="52" rx="7"/><rect class="tyre" x="164" y="95" width="31" height="48" rx="9"/><rect class="tyre" x="164" y="173" width="31" height="48" rx="9"/><rect class="tyre" x="391" y="93" width="34" height="50" rx="9"/><rect class="tyre" x="391" y="173" width="34" height="50" rx="9"/>
-      <path class="cockpit-shape" d="M285 136 Q319 112 353 136 L360 158 L353 180 Q319 202 285 180 L278 158 Z"/><path class="car-highlight-line" d="M220 158 H475"/>
+      <text class="view-label" x="32" y="25">TOP VIEW</text>
+      <!-- front wing / nose -->
+      <path class="aero-surface front-wing-element" d="M42 101 Q88 80 166 88 L184 102 L184 138 L166 152 Q88 160 42 139 Z"/>
+      <rect class="endplate" x="37" y="83" width="13" height="74" rx="3"/><rect class="endplate" x="176" y="90" width="10" height="60" rx="3"/>
+      <path class="car-body" d="M168 112 L254 104 L345 96 L395 103 L395 137 L345 144 L254 136 L168 128 Z"/>
+      <path class="nose-ridge" d="M174 120 H347"/>
+      <!-- front wheels and suspension -->
+      <rect class="tyre tyre-top" x="270" y="43" width="69" height="48" rx="12"/><rect class="tyre tyre-top" x="270" y="149" width="69" height="48" rx="12"/>
+      <path class="suspension" d="M300 91 L354 111 M300 149 L354 129 M329 91 L368 110 M329 149 L368 130"/>
+      <!-- floor, sidepods, cockpit -->
+      <path class="floor-shape" d="M350 83 L420 65 L614 57 L700 76 L748 97 L820 105 L820 135 L748 143 L700 164 L614 183 L420 174 L350 157 Z"/>
+      <path class="sidepod-shape" d="M397 88 Q444 72 520 72 L610 83 L650 105 L650 135 L610 157 L520 168 Q444 168 397 152 Z"/>
+      <path class="cockpit-shape" d="M425 104 Q458 73 500 87 Q534 99 551 120 Q534 142 500 153 Q458 166 425 136 Z"/>
+      <path class="halo-shape" d="M454 104 Q482 86 510 104 L530 120 M454 136 Q482 154 510 136"/>
+      <path class="airbox" d="M518 92 L550 102 L558 120 L550 138 L518 148 Z"/>
+      <path class="floor-edge-line" d="M374 159 Q505 186 694 155"/>
+      <!-- rear suspension / wheels / diffuser / wing -->
+      <rect class="tyre tyre-top" x="727" y="35" width="82" height="55" rx="13"/><rect class="tyre tyre-top" x="727" y="150" width="82" height="55" rx="13"/>
+      <path class="suspension" d="M690 96 L754 90 M690 144 L754 150 M706 106 L778 90 M706 134 L778 150"/>
+      <path class="rear-body" d="M645 102 L720 96 L850 105 L868 119 L850 135 L720 144 L645 138 Z"/>
+      <path class="diffuser-shape" d="M796 104 L862 92 L879 103 L879 137 L862 148 L796 136 Z"/>
+      <rect class="rear-wing-element" x="866" y="75" width="96" height="90" rx="5"/><rect class="rear-wing-main" x="854" y="91" width="112" height="15" rx="4"/><rect class="rear-wing-main" x="854" y="134" width="112" height="15" rx="4"/>
+      <path class="car-highlight-line" d="M52 120 H180 M354 82 Q560 46 817 104 M817 136 Q560 194 354 158 M860 120 H958"/>
     </g>
     <g class="car-view side-view">
-      <text class="view-label" x="500" y="88">SIDE VIEW</text>
-      <path class="car-part" d="M491 189 L535 181 L566 158 L624 153 L654 122 L697 118 L724 142 L788 153 L824 143 L854 147 L854 194 L491 194 Z"/>
-      <rect class="car-part" x="833" y="116" width="20" height="78" rx="5"/><rect class="car-part" x="492" y="175" width="52" height="10" rx="4"/>
-      <circle class="tyre" cx="582" cy="186" r="30"/><circle class="wheel-core" cx="582" cy="186" r="12"/><circle class="tyre" cx="758" cy="186" r="31"/><circle class="wheel-core" cx="758" cy="186" r="12"/>
-      <path class="cockpit-shape" d="M649 151 Q671 111 700 127 L709 151 Z"/><path class="car-highlight-line" d="M535 197 H841"/>
+      <text class="view-label" x="32" y="235">SIDE VIEW</text>
+      <!-- floor and front wing -->
+      <path class="floor-side" d="M165 370 H843 L861 380 H163 Z"/>
+      <path class="aero-surface front-wing-side" d="M45 351 L160 342 L183 350 L177 363 L48 368 Z"/><rect class="endplate" x="44" y="326" width="12" height="44" rx="3"/>
+      <!-- wheels -->
+      <circle class="tyre" cx="282" cy="347" r="45"/><circle class="wheel-core" cx="282" cy="347" r="20"/><circle class="wheel-hub" cx="282" cy="347" r="7"/>
+      <circle class="tyre" cx="773" cy="345" r="48"/><circle class="wheel-core" cx="773" cy="345" r="21"/><circle class="wheel-hub" cx="773" cy="345" r="7"/>
+      <!-- chassis -->
+      <path class="car-body" d="M150 344 L215 327 L337 318 L386 296 L459 284 L548 282 L604 294 L655 300 L711 304 L737 318 L735 355 L326 358 L208 355 Z"/>
+      <path class="sidepod-shape" d="M457 304 Q520 288 608 300 L650 318 L631 350 H430 L418 330 Z"/>
+      <path class="nose-ridge" d="M154 342 Q247 326 365 321"/>
+      <path class="cockpit-shape" d="M420 301 Q453 253 510 259 Q545 263 568 287 L551 308 L443 313 Z"/>
+      <path class="halo-shape" d="M444 294 Q468 250 509 265 Q531 273 541 294 M480 265 V302"/>
+      <path class="airbox" d="M523 263 L554 238 L586 251 L599 289 L555 290 Z"/>
+      <path class="engine-cover" d="M568 271 Q643 263 722 302 L731 326 L650 326 L611 301 Z"/>
+      <path class="suspension" d="M236 324 L282 303 M236 354 L282 391 M704 316 L773 297 M704 352 L773 393"/>
+      <!-- rear aero -->
+      <path class="diffuser-shape" d="M718 354 L842 352 L858 375 L801 379 L742 370 Z"/>
+      <rect class="rear-wing-element" x="868" y="251" width="19" height="112" rx="4"/><path class="rear-wing-main" d="M821 260 H952 L946 276 H830 Z"/><path class="rear-wing-main" d="M836 287 H950 L946 302 H842 Z"/>
+      <path class="beam-wing-line" d="M808 320 Q850 305 892 312"/>
+      <path class="car-highlight-line" d="M51 358 Q201 340 368 319 Q529 274 712 309 M326 360 H842"/>
     </g>${markers}
   </svg>`;
 }
 function carMappingSummaryHtml(team,updates){
   const summary=CD?.mappingSummary(updates)||{coverage:0,known:0,total:updates.length,high:0,mapped:updates.map((u,i)=>({...u,map:{id:'unmapped',label:'Location not mapped',confidence:'LOW'},mapIndex:i+1}))};
-  return `<div class="car-map-card"><div class="car-map-head"><div><div class="eyebrow">UPDATE LOCATION MAP</div><div class="card-title">${esc(team)} schematic</div></div><span class="map-coverage ${summary.coverage===100?'complete':''}">${summary.known}/${summary.total} mapped</span></div>${carSchematicSvg(team,updates)}<div class="map-note">Broad component locations are mapped from the FIA component name/description. This is a schematic 2026 F1 car, not team CAD geometry.</div></div>`;
+  return `<div class="car-map-card"><div class="car-map-head"><div><div class="eyebrow">UPDATE LOCATION MAP</div><div class="card-title">${esc(team)} schematic</div></div><span class="map-coverage ${summary.coverage===100?'complete':''}">${summary.known}/${summary.total} mapped</span></div>${carSchematicSvg(team,updates)}<div class="map-note">Component locations are mapped from the FIA component name/description onto a detailed generic 2026-style F1 silhouette. It shows approximate physical location, not team CAD geometry.</div></div>`;
 }
 function focusCarUpdate(id){const el=document.getElementById(id);if(!el)return;el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});el.classList.remove('update-flash');void el.offsetWidth;el.classList.add('update-flash');setTimeout(()=>el.classList.remove('update-flash'),1000);}
 function filterCarUpdateTeams(team){document.querySelectorAll('[data-update-team]').forEach(el=>el.classList.toggle('hidden',team!=='ALL'&&el.dataset.updateTeam!==team));document.querySelectorAll('[data-car-filter]').forEach(b=>b.classList.toggle('active',b.dataset.carFilter===team));}
@@ -1932,23 +1954,45 @@ function setupPullToRefresh(){
 }
 
 function setupSwipeNavigation(){
-  let startX=0,startY=0,tracking=false,horizontal=false;
-  const reset=()=>{tracking=false;horizontal=false;view.classList.remove('swipe-dragging');view.style.transform='';view.style.opacity='';};
+  let startX=0,startY=0,lastX=0,lastT=0,velocityX=0,tracking=false,horizontal=false,frame=0,target=null;
+  const preview=document.createElement('div');preview.className='swipe-preview';preview.setAttribute('aria-hidden','true');document.getElementById('app-shell')?.insertBefore?.(preview,view);
+  const paint=(dx,tgt)=>{
+    cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{
+      const width=Math.max(1,window.innerWidth),edge=tgt?Math.max(-width,Math.min(width,dx)):dx*.14,progress=Math.min(1,Math.abs(edge)/width);
+      view.classList.add('swipe-dragging');view.style.transition='none';view.style.transform=`translate3d(${edge}px,0,0)`;
+      if(tgt){const meta=SWIPE_META[tgt]||['',''];preview.innerHTML=`<span>${meta[0]}</span><b>${meta[1]}</b><small>RELEASE TO OPEN</small>`;preview.classList.add('show');preview.classList.toggle('from-right',dx<0);preview.classList.toggle('from-left',dx>0);preview.style.setProperty('--swipe-progress',String(progress));}
+      else{preview.classList.remove('show');}
+    });
+  };
+  const clean=()=>{cancelAnimationFrame(frame);tracking=false;horizontal=false;target=null;window.__f1SwipeActive=false;view.classList.remove('swipe-dragging');view.style.transition='';view.style.transform='';preview.className='swipe-preview';preview.style.removeProperty('--swipe-progress');};
+  const cancelSwipe=()=>{view.style.transition='transform .22s cubic-bezier(.2,.82,.2,1)';view.style.transform='translate3d(0,0,0)';preview.classList.remove('show');setTimeout(clean,230);};
+  const commitSwipe=(route,dx)=>{
+    const width=Math.max(320,window.innerWidth),dir=dx<0?-1:1;
+    view.style.transition='transform .18s cubic-bezier(.4,0,1,1)';view.style.transform=`translate3d(${dir*width}px,0,0)`;preview.classList.add('committing');
+    setTimeout(()=>{
+      state.route=route;state.routeMotionDirection='';if(location.hash!==`#${encodeURIComponent(route)}`)history.pushState({route},'',`#${encodeURIComponent(route)}`);
+      document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',route===b.dataset.route));window.scrollTo({top:0,behavior:'instant'});
+      view.style.transition='none';view.style.transform=`translate3d(${-dir*Math.min(90,width*.16)}px,0,0)`;render();preview.classList.remove('show','committing');
+      requestAnimationFrame(()=>requestAnimationFrame(()=>{view.style.transition='transform .24s cubic-bezier(.16,.9,.22,1)';view.style.transform='translate3d(0,0,0)';setTimeout(clean,250);}));
+      if(route==='news'&&!state.news.length&&!state.newsRefreshing)setTimeout(()=>refreshNewsOnly(true),0);
+    },175);
+  };
   window.addEventListener('touchstart',e=>{
     if(!TOP_LEVEL_ROUTES.includes(state.route)||e.touches?.length!==1)return;
     if(e.target?.closest?.('a,button,input,select,textarea,.tabs,.news-source-tabs,.weather-session-tabs,.leaflet-container,.car-schematic,[data-no-swipe]'))return;
-    startX=e.touches[0].clientX;startY=e.touches[0].clientY;tracking=true;horizontal=false;
+    const p=e.touches[0];startX=lastX=p.clientX;startY=p.clientY;lastT=performance.now();velocityX=0;tracking=true;horizontal=false;target=null;
   },{passive:true});
   window.addEventListener('touchmove',e=>{
-    if(!tracking||!e.touches?.length)return;const dx=e.touches[0].clientX-startX,dy=e.touches[0].clientY-startY;
-    if(!horizontal&&Math.abs(dx)>14&&Math.abs(dx)>Math.abs(dy)*1.25)horizontal=true;if(!horizontal)return;
-    const target=swipeTarget(state.route,dx);const resistance=target?0.23:0.08;view.classList.add('swipe-dragging');view.style.transform=`translateX(${Math.max(-64,Math.min(64,dx*resistance))}px)`;view.style.opacity=String(Math.max(.78,1-Math.abs(dx)/700));
-  },{passive:true});
+    if(!tracking||!e.touches?.length)return;const p=e.touches[0],dx=p.clientX-startX,dy=p.clientY-startY;
+    if(!horizontal){if(Math.abs(dx)<9&&Math.abs(dy)<9)return;if(Math.abs(dx)<=Math.abs(dy)*1.12){tracking=false;return;}horizontal=true;window.__f1SwipeActive=true;view.classList.add('swipe-dragging');}
+    e.preventDefault();target=swipeTarget(state.route,dx);const now=performance.now(),moveDt=Math.max(8,now-lastT);velocityX=(p.clientX-lastX)/moveDt;lastX=p.clientX;lastT=now;paint(dx,target);
+  },{passive:false});
   window.addEventListener('touchend',e=>{
-    if(!tracking){reset();return;}const touch=e.changedTouches?.[0],dx=(touch?.clientX??startX)-startX,dy=(touch?.clientY??startY)-startY;const target=Math.abs(dx)>=64&&Math.abs(dx)>Math.abs(dy)*1.35?swipeTarget(state.route,dx):null;reset();
-    if(target)setRoute(target,true,dx<0?'left':'right');
+    if(!tracking){if(horizontal)cancelSwipe();return;}const p=e.changedTouches?.[0],endX=p?.clientX??lastX,dx=endX-startX,dy=(p?.clientY??startY)-startY;
+    const width=Math.max(320,window.innerWidth),commit=target&&Math.abs(dx)>Math.abs(dy)*1.15&&(Math.abs(dx)>=Math.min(115,width*.24)||(Math.abs(dx)>=42&&Math.abs(velocityX)>.45));
+    if(commit)commitSwipe(target,dx);else cancelSwipe();
   },{passive:true});
-  window.addEventListener('touchcancel',reset,{passive:true});
+  window.addEventListener('touchcancel',()=>{if(tracking||horizontal)cancelSwipe();},{passive:true});
 }
 
 function enhanceAccessibility(){
@@ -1964,6 +2008,23 @@ async function applyAppUpdate(){
 }
 window.applyAppUpdate=applyAppUpdate;
 
+function launchWeekendSummary(){
+  if(!state.schedule.length)return {eyebrow:'F1 HUB',title:'RACE WEEKEND COMPANION',detail:'Loading the season…'};
+  const r=currentRace(),live=r?sessions(r).find(sessionIsLive):null,ns=r?nextSession(r):null;
+  if(!r)return {eyebrow:'F1 HUB',title:`${YEAR} SEASON`,detail:'Race weekend companion'};
+  if(live)return {eyebrow:`${flag(r.Circuit.Location.country)} RACE WEEKEND · LIVE`,title:r.raceName.toUpperCase(),detail:`${live.name} is in progress`};
+  if(ns)return {eyebrow:`${flag(r.Circuit.Location.country)} NEXT · ROUND ${r.round}`,title:r.raceName.toUpperCase(),detail:`${ns.name} · ${fmtDateTime(ns.iso)} UK`};
+  return {eyebrow:`${flag(r.Circuit.Location.country)} ROUND ${r.round}`,title:r.raceName.toUpperCase(),detail:'Weekend complete'};
+}
+function updateLaunchContent(){
+  const el=document.getElementById('launch-screen');if(!el)return;const info=launchWeekendSummary();
+  const eyebrow=el.querySelector?.('[data-launch-eyebrow]'),title=el.querySelector?.('[data-launch-title]'),detail=el.querySelector?.('[data-launch-detail]');if(eyebrow)eyebrow.textContent=info.eyebrow;if(title)title.textContent=info.title;if(detail)detail.textContent=info.detail;
+}
+function showLaunchSequence(short=false){
+  const el=document.getElementById('launch-screen');if(!el)return;updateLaunchContent();
+  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;el.classList.remove('hidden','leaving','short');if(short)el.classList.add('short');
+  clearTimeout(showLaunchSequence._timer);showLaunchSequence._timer=setTimeout(()=>{el.classList.add('leaving');setTimeout(()=>el.classList.add('hidden'),reduced?80:420);},reduced?220:(short?720:1250));
+}
 // Navigation / lifecycle
 window.setRoute=setRoute;
 window.refreshNewsOnly=refreshNewsOnly;
@@ -2033,6 +2094,7 @@ setupSwipeNavigation();
 let newsBackgroundedAt=Date.now();
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden){newsBackgroundedAt=Date.now();return;}
+  const awayFor=Date.now()-newsBackgroundedAt;if(awayFor>10*60e3)showLaunchSequence(true);
   const age=Date.now()-(state.newsUpdatedAt||0);
   if(age>3*60e3||Date.now()-newsBackgroundedAt>3*60e3)refreshNewsOnly(true);
   if(state.loaded&&latestCompletedRace()&&Date.now()-(state.standingsUpdatedAt||0)>5*60e3)refreshChampionshipOnly();
@@ -2043,4 +2105,5 @@ setInterval(()=>{if(!document.hidden)checkForUpdate();},15*60e3);
 // Paint cached content immediately, then refresh it without blocking startup.
 hydrateBaseFromCache();
 applyPersonalTheme();
+showLaunchSequence(false);
 loadBase();

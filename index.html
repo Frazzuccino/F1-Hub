@@ -23,9 +23,20 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=1.14.0" />
+  <link rel="stylesheet" href="styles.css?v=1.15.0" />
 </head>
 <body>
+  <div id="launch-screen" class="launch-screen" aria-hidden="true">
+    <div class="launch-speed-lines"></div>
+    <div class="launch-inner">
+      <div class="launch-brand"><span>F1</span><b>HUB</b></div>
+      <div class="launch-track"><i></i><i></i><i></i></div>
+      <div class="launch-eyebrow" data-launch-eyebrow>F1 HUB</div>
+      <div class="launch-title" data-launch-title>RACE WEEKEND COMPANION</div>
+      <div class="launch-detail" data-launch-detail>Loading the season…</div>
+      <div class="launch-progress"><i></i></div>
+    </div>
+  </div>
   <div id="app-shell">
     <header class="topbar">
       <button id="brand-btn" class="brand" aria-label="Home">
@@ -60,8 +71,9 @@
   </div>
   <div id="update-banner" class="update-banner hidden" role="status"><span>A newer F1 Hub version is available.</span><button id="update-now" class="external-btn red">UPDATE</button></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="quality-core.js?v=1.14.0"></script>
-  <script src="car-development-core.js?v=1.14.0"></script>
-  <script src="app.js?v=1.14.0"></script>
+  <script src="quality-core.js?v=1.15.0"></script>
+  <script src="car-development-core.js?v=1.15.0"></script>
+  <script src="driver-career-core.js?v=1.15.0"></script>
+  <script src="app.js?v=1.15.0"></script>
 </body>
 </html>

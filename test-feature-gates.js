@@ -18,7 +18,8 @@ scores.push(gate('Car Development parsing & mapping',[
  ['floor-board stay maps',()=>CD.matchZone({component:'Forward Floor Board Stay'}).id!=='unmapped'],
  ['combined components can map twice',()=>CD.matchZones({component:'Floor Edge and Diffuser'}).length===2],
  ['unknown components remain honest',()=>CD.matchZone({component:'Mystery Device'}).id==='unmapped'],
- ['official source link retained',()=>app.includes('OFFICIAL FIA DOCUMENT ↗')]
+ ['official source link retained',()=>app.includes('OFFICIAL FIA DOCUMENT ↗')],
+ ['detailed F1 silhouette includes halo/suspension/wings',()=>app.includes('car-schematic-v2')&&app.includes('halo-shape')&&app.includes('suspension')&&app.includes('rear-wing-main')]
 ]));
 
 scores.push(gate('Favourite cleanup',[
@@ -28,7 +29,7 @@ scores.push(gate('Favourite cleanup',[
  ['news source tabs contain no MYF1',()=>!section('function renderNews','function renderMore').includes('MYF1')],
  ['news source tabs contain no My F1 label',()=>!section('function renderNews','function renderMore').includes('MY F1')],
  ['favourite theme remains available',()=>app.includes('applyPersonalTheme')],
- ['Home favourite card remains',()=>app.includes('function favouriteCard')],
+ ['Home favourite card removed',()=>!section('function renderHome','function latestHeadline').includes('favouriteCard')],
  ['Car Development favourite-team filter remains',()=>app.includes('★ MY TEAM')],
  ['driver grid personalisation remains',()=>section('function driverCard','function buildDriverCareer').includes('isFavouriteDriver')],
  ['theme opt-out remains',()=>app.includes('f1hub:personal-theme')]
@@ -38,9 +39,9 @@ scores.push(gate('Swipe navigation',[
  ['top-level route order declared',()=>app.includes("['home','races','standings','news','more']")],
  ['swipe helper calculates adjacent route',()=>app.includes('function swipeTarget')],
  ['touchstart tracked',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes("addEventListener('touchstart'")],
- ['touchmove gives direct visual feedback',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('translateX')],
- ['touchend changes route',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('setRoute(target')],
- ['edge resistance exists',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('resistance=target?0.23:0.08')],
+ ['touchmove follows finger with translate3d',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('translate3d(${edge}px,0,0)')],
+ ['touchend commits adjacent route',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('commitSwipe(target,dx)')],
+ ['edge resistance only applies beyond navigation edge',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('dx*.14')],
  ['interactive controls excluded',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('a,button,input,select,textarea')],
  ['weather tabs excluded',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('.weather-session-tabs')],
  ['left/right route animation classes',()=>css.includes('.route-swipe-left')&&css.includes('.route-swipe-right')],
@@ -61,9 +62,9 @@ scores.push(gate('More hierarchy',[
 ]));
 
 scores.push(gate('Driver career history',[
- ['career archive endpoint',()=>app.includes('/drivers/${encodeURIComponent(id)}/results/?limit=2000')],
+ ['career archive is paginated',()=>app.includes('limit=${pageSize}&offset=${offset}')&&app.includes('MRData?.total')],
  ['career aggregation helper',()=>app.includes('function buildDriverCareer')],
- ['career totals include starts',()=>section('function driverCareerHtml','async function loadDriverCareerInto').includes('STARTS')],
+ ['career totals include full Grand Prix entries',()=>section('function driverCareerHtml','async function fetchAllDriverCareerRaces').includes('GRANDS PRIX')],
  ['career totals include wins',()=>section('function driverCareerHtml','async function loadDriverCareerInto').includes('WINS')],
  ['career totals include podiums',()=>section('function driverCareerHtml','async function loadDriverCareerInto').includes('PODIUMS')],
  ['team history timeline',()=>section('function driverCareerHtml','async function loadDriverCareerInto').includes('TEAM HISTORY')],
@@ -97,6 +98,20 @@ scores.push(gate('Race Calendar redesign',[
  ['selection animation before navigation',()=>app.includes('openRaceFromCalendar')&&css.includes('.calendar-race.is-opening')],
  ['sibling dimming on selection',()=>section('function openRaceFromCalendar','window.openRaceFromCalendar').includes('is-navigating')],
  ['spoiler winner protection retained',()=>section('function calendarRaceCard','function renderRaces').includes('SPOILER HIDDEN')]
+]));
+
+
+scores.push(gate('Race-weekend launch experience',[
+ ['launch overlay is present',()=>fs.readFileSync(path.join(ROOT,'index.html'),'utf8').includes('id="launch-screen"')],
+ ['launch summary uses current/next race',()=>app.includes('function launchWeekendSummary')&&app.includes('NEXT · ROUND')],
+ ['live session launch state exists',()=>section('function launchWeekendSummary','function updateLaunchContent').includes('RACE WEEKEND · LIVE')],
+ ['first install can update launch content after schedule arrives',()=>app.includes('updateLaunchContent();')],
+ ['launch is non-blocking',()=>app.indexOf('showLaunchSequence(false);')<app.lastIndexOf('loadBase();')],
+ ['long-resume launch exists',()=>app.includes('awayFor>10*60e3')&&app.includes('showLaunchSequence(true)')],
+ ['launch has speed-line animation',()=>css.includes('.launch-speed-lines')&&css.includes('@keyframes launchSpeed')],
+ ['launch has progress animation',()=>css.includes('.launch-progress')&&css.includes('@keyframes launchProgress')],
+ ['team theme accent carries through launch',()=>css.includes('var(--red)')],
+ ['reduced motion is respected',()=>css.includes('@media(prefers-reduced-motion:reduce)')&&css.includes('.launch-screen{transition:none}')]
 ]));
 
 const avg=scores.reduce((a,b)=>a+b,0)/scores.length;

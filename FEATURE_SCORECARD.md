@@ -1,40 +1,31 @@
-# F1 Hub v1.14.0 — Feature Scorecard
+# F1 Hub v1.15.0 — Feature Scorecard
 
-The user-requested changes were assessed independently. A feature was not accepted for release below 9/10.
+This release used the same rule as the previous quality releases: no requested change is accepted until it reaches at least 9/10 in its own review gate.
 
-| Update | Initial review / gate | Final subjective score | Automated gate |
-|---|---:|---:|---:|
-| Car Development parsing & mapping | Existing v1.13 behaviour failed on flattened FIA text | 9.7/10 | 10.00/10 |
-| Favourite cleanup (Standings + News) | 9.2/10 | 9.8/10 | 10.00/10 |
-| Swipe navigation | 8.7/10 prototype | 9.5/10 | 10.00/10 |
-| More hierarchy | 9.1/10 | 9.6/10 | 10.00/10 |
-| Driver career history | 9.0/10 | 9.4/10 | 10.00/10 |
-| Session-selectable weather | 9.1/10 | 9.5/10 | 10.00/10 |
-| Race Calendar redesign | 8.0/10 first gate | 9.6/10 | 10.00/10 |
+| Update | First-pass score | What held it back | Final score |
+|---|---:|---|---:|
+| Car Development F1-car diagram | 7.4/10 | The previous boxy top/side schematic conveyed location but did not visually read as a modern F1 car. | **9.5/10** |
+| Left/right swipe navigation | 6.8/10 | The old gesture only moved the page about 64 px and then re-rendered, so movement felt detached from the finger. | **9.4/10** |
+| Driver career accuracy | 5.5/10 | Jolpica/Ergast caps one response at 100 results; `limit=2000` still returned only the first 100 races. | **9.8/10** |
+| Remove My F1 from Home | 10.0/10 | Straightforward layout cleanup. | **10.0/10** |
+| Race-weekend launch animation | 7.5/10 | No true opening experience existed and a first install could not show race context immediately. | **9.4/10** |
 
 ## Iterations made before acceptance
 
 ### Car Development
-The v1.13 parser expected table-like rows. The current FIA Car Presentation Submission can be extracted as flattened text, which caused update-bearing teams to disappear while an explicit “No updates submitted” team remained visible. v1.14 adds a second parser for the flattened structure, retains the table parser, explicitly keeps parse-warning teams, and adds aliases for current component terminology such as Forward Floor Board Stay.
-
-A regression fixture modelled on the current Italian GP submission checks all 11 teams: ten update-bearing teams plus Audi with an explicit zero-update declaration.
+The first design was rejected at 7.4/10. The replacement uses a substantially more detailed, stacked top/side technical silhouette with front/rear wings, endplates, wheels, suspension lines, floor, sidepods, cockpit, halo, airbox, engine cover, diffuser and beam-wing area. Update markers were remapped to the new geometry. A rendered visual QA snapshot is included at `tests/car-schematic-preview.png`.
 
 ### Swipe navigation
-The first design was scored below 9 because a global horizontal gesture could conflict with vertical pull-to-refresh and controls such as weather tabs. The final implementation uses axis discrimination, edge resistance, excludes links/buttons/forms/maps/car schematics/session tabs, gives direct finger-follow visual feedback, and uses directional route transitions after release.
+The old resisted 64-pixel nudge was rejected at 6.8/10. The replacement uses direct manipulation: the current page follows the finger across the viewport, the destination section appears underneath, horizontal movement locks the gesture and prevents vertical browser jitter, and release decisions use both distance and flick velocity. A second pass corrected the flick-velocity calculation before release.
 
-### Race Calendar
-The first feature gate scored 8/10. The final version adds a continuous season rail through month/card gaps, a clearer season-progress header, circuit silhouettes, next-round emphasis, status states, spoiler-safe completed-race copy, sibling dimming and an animated selected-card transition before entering the Race Hub.
+### Driver career accuracy
+The previous code requested `limit=2000`, but the Ergast-compatible API's per-page maximum is 100. The accepted implementation reads `MRData.total`, generates offsets in 100-result pages, fetches every page, deduplicates season/round results, and only then calculates GP total, wins, podiums, best finish, team history and season history. Incomplete archives are explicitly labelled rather than silently shown as complete.
 
-## Final feature-gate result
+### Launch sequence
+A race-weekend-aware launch screen now uses cached calendar data immediately. If this is a first install without cached data, the visible launch content updates as soon as the calendar request succeeds without restarting or delaying the animation. It also returns after a long app-background period, while respecting reduced-motion settings.
 
-```text
-Car Development parsing & mapping  10/10
-Favourite cleanup                  10/10
-Swipe navigation                   10/10
-More hierarchy                     10/10
-Driver career history              10/10
-Session weather                    10/10
-Race Calendar redesign             10/10
+## Final release judgement
 
-FEATURE GATE AVERAGE: 10.00/10
-```
+**Feature-quality average: 9.62/10**
+
+The remaining uncertainty is real-device gesture feel and the availability of third-party live APIs on the user's phone. Those cannot be fully guaranteed by static/runtime tests, so the scores deliberately stop short of 10/10 despite the automated gates passing in full.

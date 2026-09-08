@@ -1,5 +1,5 @@
 'use strict';
-const fs=require('fs');const path=require('path');const Q=require('../quality-core.js');const CD=require('../car-development-core.js');
+const fs=require('fs');const path=require('path');const Q=require('../quality-core.js');const CD=require('../car-development-core.js');const CAREER=require('../driver-career-core.js');
 const ROOT=path.resolve(__dirname,'..');
 let passed=0,failed=0;const results=[];
 function test(name,fn,category='general'){try{fn();passed++;results.push({name,category,ok:true});}catch(e){failed++;results.push({name,category,ok:false,error:e.message});}}
@@ -25,22 +25,23 @@ test('freshness classifies stale records',()=>ok(Q.freshness(Date.now()-400000,6
 test('quality scoring weights categories',()=>ok(Q.overallQualityScore({data:9,reliability:9,performance:9,ux:9,features:9,pwa:9,accessibility:9,tests:9})===9),'tests');
 
 const app=fs.readFileSync(path.join(ROOT,'app.js'),'utf8'),html=fs.readFileSync(path.join(ROOT,'index.html'),'utf8'),css=fs.readFileSync(path.join(ROOT,'styles.css'),'utf8'),sw=fs.readFileSync(path.join(ROOT,'service-worker.js'),'utf8'),manifest=JSON.parse(fs.readFileSync(path.join(ROOT,'manifest.json'),'utf8'));
-test('release version is 1.14.0',()=>ok(app.includes("APP_VERSION = '1.14.0'")),'pwa');
+test('release version is 1.15.0',()=>ok(app.includes("APP_VERSION = '1.15.0'")),'pwa');
 test('quality core loads before app',()=>ok(html.indexOf('quality-core.js')<html.indexOf('app.js')),'reliability');
 test('car development core loads before app',()=>ok(html.indexOf('car-development-core.js')>0&&html.indexOf('car-development-core.js')<html.indexOf('app.js')),'reliability');
+test('driver career core loads before app',()=>ok(html.indexOf('driver-career-core.js')>0&&html.indexOf('driver-career-core.js')<html.indexOf('app.js')),'reliability');
 test('hard-coded standings snapshot removed',()=>ok(!app.includes('BUNDLED_STANDINGS_SNAPSHOTS')),'reliability');
 test('standings reconstruct from previous round',()=>ok(app.includes('deriveStandingsFromPreviousRound')),'reliability');
 test('result validation wired into race results',()=>ok(app.includes("validateResults(rr?.Results")),'data');
 test('Data Health screen exists',()=>ok(app.includes("renderDataHealth")),'ux');
 test('Data Health strip is removed from Home',()=>{const h=app.slice(app.indexOf('function renderHome()'),app.indexOf('function latestHeadline()'));ok(!h.includes('freshnessStrip()'));},'ux');
 test('favourite driver preference exists',()=>ok(app.includes('favouriteDriver')),'features');
-test('My F1 Home card exists',()=>ok(app.includes('function favouriteCard')),'features');
+test('My F1 card is removed from Home',()=>{const h=app.slice(app.indexOf('function renderHome()'),app.indexOf('function latestHeadline()'));ok(!h.includes('favouriteCard()'));},'features');
 test('My F1 can theme the app from favourite team',()=>ok(app.includes('function applyPersonalTheme')&&app.includes('f1hub:personal-theme')),'features');
 test('My F1 theme changes core accent variable',()=>ok(app.includes("setProperty('--red',accent)")),'ux');
 test('session schedule renderer remains available',()=>ok(app.includes('function sessionRows(r)')),'reliability');
 test('Standings stay neutral when favourites are set',()=>{const s=app.slice(app.indexOf('function standingRow'),app.indexOf('function renderHome'));ok(!s.includes('is-favourite')&&!s.includes('★'));},'features');
 test('News has no My F1 filter tab',()=>{const s=app.slice(app.indexOf('function renderNews'),app.indexOf('function renderMore'));ok(!s.includes('MYF1')&&!s.includes('★ MY F1'));},'features');
-test('My F1 includes team-mate context on Home',()=>ok(app.includes('TEAM-MATE')&&app.includes('mateGap')),'features');
+test('My F1 preferences remain available without occupying Home',()=>ok(app.includes('renderPreferences')&&app.includes("'My F1'")),'features');
 test('My F1 affects Car Development ordering/filter',()=>ok(app.includes('★ MY TEAM')&&app.includes('favourite-update-team')),'features');
 test('race weekend calendar export exists',()=>ok(app.includes('addRaceWeekendCalendar')),'features');
 test('calendar export contains reminder alarm',()=>ok(app.includes('BEGIN:VALARM')&&app.includes('TRIGGER:-PT30M')),'features');
@@ -93,7 +94,8 @@ test('car update UI has top and side schematic',()=>ok(app.includes('TOP VIEW')&
 test('car schematic discloses it is not CAD geometry',()=>ok(app.includes('not team CAD geometry')),'reliability');
 test('Car Development keeps explicit zero-update teams and parse warnings',()=>ok(app.includes('NO UPDATES SUBMITTED')&&app.includes('UPDATE TABLE COULD NOT BE SPLIT')&&app.includes('parseWarning')),'features');
 test('car markers link to update details',()=>ok(app.includes('focusCarUpdate')&&app.includes('update-flash')),'ux');
-test('service worker caches car-development core',()=>ok(sw.includes('car-development-core.js?v=1.14.0')),'performance');
+test('service worker caches car-development core',()=>ok(sw.includes('car-development-core.js?v=1.15.0')),'performance');
+test('service worker caches driver-career core',()=>ok(sw.includes('driver-career-core.js?v=1.15.0')),'performance');
 // Motion quality: transitions only on navigation, not every background render.
 test('route motion helper exists',()=>ok(app.includes('function animateRouteContent')),'ux');
 test('render no longer replays view animation every refresh',()=>{const r=app.slice(app.indexOf('function render(){'),app.indexOf('function titleBlock'));ok(!r.includes("classList.add('view-enter')"));},'performance');
@@ -110,16 +112,33 @@ test('Racing Bulls is resolved before Red Bull in FIA team parser',()=>{const s=
 test('forward floor board stay has a schematic mapping',()=>ok(CD.matchZone({component:'Forward Floor Board Stay'}).id!=='unmapped'),'features');
 test('swipe navigation covers the five bottom-nav sections',()=>ok(app.includes("const TOP_LEVEL_ROUTES=['home','races','standings','news','more']")&&app.includes('function setupSwipeNavigation')),'ux');
 test('swipe direction has dedicated transition classes',()=>ok(css.includes('.route-swipe-left')&&css.includes('.route-swipe-right')&&css.includes('.swipe-dragging')),'ux');
-test('horizontal swipe does not conflict with pull-to-refresh',()=>ok(app.includes('Math.abs(dx)>Math.abs(dy)*1.15')),'ux');
+test('horizontal swipe locks gesture and prevents vertical browser jitter',()=>ok(app.includes('e.preventDefault()')&&app.includes('window.__f1SwipeActive=true')),'ux');
 test('More no longer exposes Teams',()=>{const s=app.slice(app.indexOf('function renderMore'),app.indexOf('function menu('));ok(!s.includes("'Teams'"));},'features');
 test('My F1 is the final More menu group',()=>{const s=app.slice(app.indexOf('function renderMore'),app.indexOf('function menu('));ok(s.indexOf('PERSONALISE')>s.indexOf('RACE REFERENCE')&&s.indexOf("'My F1'")>s.indexOf("'Data Health'"));},'ux');
-test('Drivers load full career race archive',()=>ok(app.includes('/drivers/${encodeURIComponent(id)}/results/?limit=2000')&&app.includes('function buildDriverCareer')),'features');
+test('Drivers paginate the full career archive in 100-result pages',()=>ok(app.includes('function fetchAllDriverCareerRaces')&&app.includes('limit=${pageSize}&offset=${offset}')&&app.includes('MRData?.total')),'features');
 test('Driver career includes team history and season-by-season history',()=>ok(app.includes('TEAM HISTORY')&&app.includes('SEASON BY SEASON')&&app.includes('career-team-timeline')),'features');
 test('Driver career records mid-season team changes',()=>ok(app.includes("x.teams.join(' → ')")),'features');
 test('Weather can switch between upcoming sessions',()=>ok(app.includes('function upcomingWeatherSessions')&&app.includes('function weatherSessionTabs')&&app.includes('selectWeatherSession')),'features');
 test('Weather session tabs are excluded from page swipe gesture',()=>ok(app.includes('.weather-session-tabs')),'ux');
 test('Race Calendar uses animated timeline cards',()=>ok(app.includes('calendar-overview')&&app.includes('calendar-rail')&&css.includes('.calendar-list:before')&&css.includes('.calendar-race.is-opening')),'features');
 test('Race Calendar selection animates before opening race hub',()=>ok(app.includes('openRaceFromCalendar')&&app.includes("classList.add('is-opening')")),'ux');
+
+
+// v1.15 quality gates
+// Jolpica/Ergast caps result pages at 100, so a long career must be split across offsets.
+test('career pagination creates all required offsets',()=>eq(CAREER.pageOffsets(393,100),[0,100,200,300]),'data');
+test('career builder handles a 393-race archive without truncation',()=>{const rows=[];for(let i=0;i<393;i++){const pos=i<106?1:i<207?2:4;rows.push({season:String(2007+Math.floor(i/20)),round:String((i%20)+1),Results:[{position:String(pos),Constructor:{name:i<120?'McLaren':'Mercedes'}}]});}const c=CAREER.build(rows,393);ok(c.starts===393&&c.wins===106&&c.podiums===207&&c.complete);},'data');
+test('career UI labels full Grand Prix total rather than misleading 100-start sample',()=>ok(app.includes('<small>GRANDS PRIX</small>')&&app.includes('every paginated Jolpica/Ergast Grand Prix result')),'features');
+test('car drawing uses detailed stacked 2026-style geometry',()=>ok(app.includes('car-schematic-v2')&&app.includes('front-wing-element')&&app.includes('halo-shape')&&app.includes('suspension')&&app.includes('rear-wing-main')),'features');
+test('car schematic is tall enough to show top and side views clearly',()=>ok(app.includes('viewBox="0 0 1000 440"')),'ux');
+test('car mapping coordinates were moved to the detailed schematic',()=>ok(CD.matchZone({component:'Rear Wing'}).top[0]>850&&CD.matchZone({component:'Front Wing'}).side[1]>300),'features');
+test('swipe uses direct finger translation rather than a 64px resisted nudge',()=>ok(app.includes('edge=tgt?Math.max(-width,Math.min(width,dx)):dx*.14')&&!app.includes('Math.max(-64,Math.min(64')),'ux');
+test('swipe commit uses distance and velocity thresholds',()=>ok(app.includes('Math.abs(velocityX)>.45')&&app.includes('width*.24')&&app.includes('velocityX=(p.clientX-lastX)/moveDt')),'ux');
+test('swipe preview identifies destination section under the moving page',()=>ok(app.includes('SWIPE_META')&&css.includes('.swipe-preview.show')),'ux');
+test('launch overlay exists and is race-weekend aware',()=>ok(html.includes('id="launch-screen"')&&app.includes('function launchWeekendSummary')&&app.includes('NEXT · ROUND')),'features');
+test('launch sequence does not block background data refresh',()=>ok(app.indexOf('showLaunchSequence(false);')<app.lastIndexOf('loadBase();')),'performance');
+test('launch sequence returns on meaningful long app resume',()=>ok(app.includes('awayFor>10*60e3')&&app.includes('showLaunchSequence(true)')),'ux');
+test('launch animation respects reduced motion',()=>ok(css.includes('.launch-brand')&&css.includes('@media(prefers-reduced-motion:reduce)')&&css.includes('.launch-screen{transition:none}')),'accessibility');
 
 const cats={};for(const r of results){cats[r.category]??={pass:0,total:0};cats[r.category].total++;if(r.ok)cats[r.category].pass++;}
 const score=10*passed/(passed+failed);

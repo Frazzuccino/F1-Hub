@@ -2,12 +2,13 @@
 const fs=require('fs'),vm=require('vm'),path=require('path');
 global.F1HubQuality=require('../quality-core.js');
 global.F1HubCarDevelopment=require('../car-development-core.js');
+global.F1HubDriverCareer=require('../driver-career-core.js');
 const dummy=()=>({
   textContent:'',className:'',innerHTML:'',dataset:{},style:{setProperty(){},removeProperty(){}},classList:{add(){},remove(){},toggle(){},contains(){return false}},
-  addEventListener(){},removeEventListener(){},querySelector(){return null},querySelectorAll(){return []},closest(){return null},appendChild(){},remove(){},setAttribute(){},hasAttribute(){return false},
+  addEventListener(){},removeEventListener(){},querySelector(){return null},querySelectorAll(){return []},closest(){return null},appendChild(){},insertBefore(){},remove(){},setAttribute(){},hasAttribute(){return false},
   get value(){return this._value||''},set value(v){this._value=v},options:[],disabled:false
 });
-const elems=new Map();['view','toast','connection-pill','refresh-btn','brand-btn','install-app-btn','install-sheet','install-now','install-later','update-banner','update-now','pull-indicator'].forEach(id=>elems.set(id,dummy()));
+const elems=new Map();['view','toast','connection-pill','refresh-btn','brand-btn','install-app-btn','install-sheet','install-now','install-later','update-banner','update-now','pull-indicator','app-shell','launch-screen'].forEach(id=>elems.set(id,dummy()));
 global.document={
   hidden:false,body:dummy(),head:dummy(),documentElement:dummy(),
   getElementById(id){if(!elems.has(id))elems.set(id,dummy());return elems.get(id)},querySelector(){return null},querySelectorAll(){return []},
@@ -20,7 +21,7 @@ global.DOMParser=class{parseFromString(){return {querySelector(){return null},ge
 global.fetch=async()=>{throw new Error('offline smoke')};
 global.AbortController=class{constructor(){this.signal={}}abort(){}};
 global.setInterval=()=>0;global.clearInterval=()=>{};global.setTimeout=()=>0;global.clearTimeout=()=>{};
-global.requestAnimationFrame=(fn)=>fn();
+global.requestAnimationFrame=(fn)=>fn();global.cancelAnimationFrame=()=>{};
 try{
   const code=fs.readFileSync(path.join(__dirname,'..','app.js'),'utf8');vm.runInThisContext(code,{filename:'app.js'});
 
@@ -185,7 +186,7 @@ The vane improves aerodynamic performance.
 
   const none=vm.runInThisContext("parseCarPresentation('Aston Martin Aramco F1 Team\\nNo updates submitted for this event.')");if(none.teams.length!==1||!none.teams[0].noUpdates)throw new Error('FIA no-update team parser failed');
   const carHtml=vm.runInThisContext("carUpdatesHtml(parseCarPresentation('Mercedes\\n| 1 | Front Wing | Circuit specific | Revised flap | Lower drag |'),{url:'https://fia.example/doc.pdf'})");
-  if(!carHtml.includes('TOP VIEW')||!carHtml.includes('Front wing'))throw new Error('car schematic render failed');
+  if(!carHtml.includes('TOP VIEW')||!carHtml.includes('SIDE VIEW')||!carHtml.includes('car-schematic-v2')||!carHtml.includes('halo-shape')||!carHtml.includes('Front wing'))throw new Error('detailed car schematic render failed');
 
   const theme=vm.runInThisContext("(()=>{state.favouriteTeam='McLaren';state.personalTheme=true;applyPersonalTheme();return favouriteTeamName();})()");if(theme!=='McLaren')throw new Error('My F1 theme runtime failed');
   const standingsHtml=vm.runInThisContext("standingRow({position:'1',points:'100',wins:'2',Driver:{code:'AAA',familyName:'Alpha'},Constructors:[{name:'McLaren'}]})");
@@ -193,6 +194,7 @@ The vane improves aerodynamic performance.
 
   const career=vm.runInThisContext("buildDriverCareer([{season:'2019',round:'1',Results:[{position:'10',Constructor:{name:'Toro Rosso'}}]},{season:'2019',round:'12',Results:[{position:'5',Constructor:{name:'Red Bull'}}]},{season:'2020',round:'1',Results:[{position:'3',Constructor:{name:'Red Bull'}}]}])");
   if(career.teams.length!==2||career.seasons.find(x=>x.season===2019)?.teams.join('>')!=='Toro Rosso>Red Bull')throw new Error('driver career team history failed');
+  const offsets=vm.runInThisContext('careerPageOffsets(393,100)');if(JSON.stringify(offsets)!=='[0,100,200,300]')throw new Error('career pagination offsets failed: '+JSON.stringify(offsets));
 
   const sw1=vm.runInThisContext("swipeTarget('races',-120)"),sw2=vm.runInThisContext("swipeTarget('standings',120)"),edge=vm.runInThisContext("swipeTarget('home',120)");
   if(sw1!=='standings'||sw2!=='races'||edge!==null)throw new Error('swipe route helper failed');

@@ -266,3 +266,39 @@ body.personal-theme .my-f1-card{box-shadow:0 14px 40px #0005,inset 0 0 0 1px col
 /* v1.14.0 calendar continuity polish: a subtle season rail runs through card gaps/month breaks. */
 .calendar-list:before{content:"";position:absolute;z-index:0;left:29px;top:42px;bottom:34px;width:1px;background:linear-gradient(180deg,transparent,#292929 4%,#292929 96%,transparent);pointer-events:none}
 .calendar-month,.calendar-race{position:relative;z-index:1}
+
+/* v1.15.0 — detailed car schematic, direct-manipulation swipe physics, launch sequence */
+.view{position:relative;z-index:4;background:var(--bg);min-height:calc(100vh - 66px);backface-visibility:hidden;transform:translate3d(0,0,0);touch-action:pan-y;contain:layout paint style}
+.view.swipe-dragging{transition:none!important;will-change:transform;box-shadow:0 0 48px #000c}
+.swipe-preview{position:fixed;z-index:3;left:0;right:0;top:66px;bottom:calc(62px + var(--safe-bottom));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:radial-gradient(circle at 50% 45%,color-mix(in srgb,var(--red) 15%,#111),#080808 68%);opacity:0;pointer-events:none;transform:scale(.965);transition:.12s opacity,.12s transform;overflow:hidden}
+.swipe-preview:before{content:"";position:absolute;width:55vw;height:55vw;border:5vw solid color-mix(in srgb,var(--red) 8%,transparent);border-radius:50%;opacity:calc(.25 + var(--swipe-progress,0)*.6)}
+.swipe-preview.show{opacity:calc(.2 + var(--swipe-progress,0)*.8);transform:scale(calc(.965 + var(--swipe-progress,0)*.035))}.swipe-preview.committing{opacity:1}
+.swipe-preview span,.swipe-preview b,.swipe-preview small{position:relative;z-index:1}.swipe-preview span{font-size:42px;color:var(--red);transform:translateX(calc((1 - var(--swipe-progress,0))*12px))}.swipe-preview b{font-size:22px;letter-spacing:2px}.swipe-preview small{font-size:8px;color:#777;font-weight:950;letter-spacing:1.2px;margin-top:5px}
+.swipe-preview.from-left span{transform:translateX(calc((1 - var(--swipe-progress,0))*-12px))}
+
+.car-schematic-v2{min-height:0;margin-top:7px;background:radial-gradient(circle at 48% 39%,#191919,#080808 67%);border:1px solid #171717}
+.car-schematic-v2 .car-view *{vector-effect:non-scaling-stroke}
+.car-schematic-v2 .car-body{fill:#181818;stroke:#5b5b5b;stroke-width:2}
+.car-schematic-v2 .floor-shape,.car-schematic-v2 .floor-side{fill:#101010;stroke:#454545;stroke-width:2}
+.car-schematic-v2 .sidepod-shape{fill:url(#none);fill:#1d1d1d;stroke:#626262;stroke-width:2}
+.car-schematic-v2 .aero-surface,.car-schematic-v2 .rear-wing-element,.car-schematic-v2 .rear-wing-main,.car-schematic-v2 .diffuser-shape{fill:#141414;stroke:color-mix(in srgb,var(--car-accent) 45%,#5b5b5b);stroke-width:2}
+.car-schematic-v2 .endplate{fill:#101010;stroke:#707070;stroke-width:2}.car-schematic-v2 .tyre-top,.car-schematic-v2 .tyre{fill:#050505;stroke:#747474;stroke-width:2.2}.car-schematic-v2 .wheel-core{fill:#191919;stroke:#757575;stroke-width:2}.car-schematic-v2 .wheel-hub{fill:#444;stroke:#999;stroke-width:1.5}
+.car-schematic-v2 .cockpit-shape{fill:#090909;stroke:#777;stroke-width:2}.car-schematic-v2 .halo-shape{fill:none;stroke:#a0a0a0;stroke-width:3;stroke-linecap:round}.car-schematic-v2 .airbox{fill:#171717;stroke:#666;stroke-width:2}.car-schematic-v2 .engine-cover{fill:#171717;stroke:#565656;stroke-width:2}
+.car-schematic-v2 .suspension{fill:none;stroke:#757575;stroke-width:2;stroke-linecap:round}.car-schematic-v2 .nose-ridge,.car-schematic-v2 .floor-edge-line,.car-schematic-v2 .beam-wing-line{fill:none;stroke:#676767;stroke-width:1.6;stroke-linecap:round}.car-schematic-v2 .car-highlight-line{stroke:var(--car-accent);stroke-width:2;opacity:.45;filter:drop-shadow(0 0 5px color-mix(in srgb,var(--car-accent) 35%,transparent))}
+.car-schematic-v2 .view-label{font-size:12px;fill:#868686;letter-spacing:1.6px}.car-schematic-v2 .side-view:before{stroke:#222}
+.car-schematic-v2 .car-marker circle{r:13;filter:drop-shadow(0 0 7px color-mix(in srgb,var(--car-accent) 70%,transparent))}.car-schematic-v2 .side-marker{opacity:.9}
+.career-warning{margin-top:12px;padding:9px 11px;border-radius:10px;border:1px solid #624d21;background:#211a0c;color:#f0c565;font-size:9px;font-weight:850}
+
+.launch-screen{position:fixed;inset:0;z-index:200;display:grid;place-items:center;overflow:hidden;background:#070707;color:#fff;opacity:1;transition:.4s opacity cubic-bezier(.4,0,.2,1);--launch-accent:var(--red)}
+.launch-screen.hidden{display:none}.launch-screen.leaving{opacity:0;pointer-events:none}.launch-screen:before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 62% 43%,color-mix(in srgb,var(--red) 12%,transparent),transparent 42%),linear-gradient(115deg,transparent 42%,color-mix(in srgb,var(--red) 7%,transparent) 43%,transparent 44%)}
+.launch-inner{width:min(82vw,520px);position:relative;z-index:2}.launch-brand{display:flex;align-items:baseline;gap:9px;animation:launchBrand .58s cubic-bezier(.16,.9,.22,1) both}.launch-brand span{font-size:48px;font-weight:1000;font-style:italic;letter-spacing:-4px;color:var(--red)}.launch-brand b{font-size:22px;letter-spacing:4px}
+.launch-track{height:3px;margin:18px 0 24px;display:flex;gap:5px;overflow:hidden}.launch-track i{display:block;height:100%;background:var(--red);border-radius:99px;transform-origin:left;animation:launchLine .7s cubic-bezier(.2,.8,.2,1) both}.launch-track i:nth-child(1){width:48%}.launch-track i:nth-child(2){width:22%;animation-delay:.08s}.launch-track i:nth-child(3){width:12%;animation-delay:.14s}
+.launch-eyebrow{color:var(--red);font-size:11px;font-weight:950;letter-spacing:1.8px;animation:launchText .45s .22s both}.launch-title{font-size:clamp(28px,8vw,48px);font-weight:1000;line-height:.98;letter-spacing:-1.2px;margin-top:6px;animation:launchText .48s .28s both}.launch-detail{font-size:13px;color:#a8a8a8;margin-top:11px;font-weight:750;animation:launchText .45s .34s both}
+.launch-progress{height:2px;margin-top:27px;background:#222;overflow:hidden}.launch-progress i{display:block;height:100%;width:100%;background:linear-gradient(90deg,var(--red2),var(--red),#fff);transform-origin:left;animation:launchProgress 1.08s .1s cubic-bezier(.2,.72,.2,1) both}
+.launch-speed-lines{position:absolute;inset:-20%;transform:rotate(-14deg);background:repeating-linear-gradient(90deg,transparent 0 11%,color-mix(in srgb,var(--red) 5%,transparent) 11.2% 11.45%,transparent 11.7% 19%);animation:launchSpeed .9s ease-out both}
+.launch-screen.short .launch-progress i{animation-duration:.55s}.launch-screen.short .launch-brand{animation-duration:.35s}.launch-screen.short .launch-track i{animation-duration:.4s}
+@keyframes launchBrand{from{opacity:0;transform:translateX(-34px) skewX(-7deg)}to{opacity:1;transform:none}}@keyframes launchLine{from{transform:scaleX(0);opacity:.2}to{transform:scaleX(1);opacity:1}}@keyframes launchText{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}@keyframes launchProgress{from{transform:scaleX(0)}to{transform:scaleX(1)}}@keyframes launchSpeed{from{opacity:0;transform:translateX(18%) rotate(-14deg)}to{opacity:1;transform:translateX(0) rotate(-14deg)}}
+
+@media(max-width:620px){.car-schematic-v2{width:calc(100% + 2px);margin-left:-1px}.launch-inner{width:84vw}.swipe-preview{top:66px}}
+@media(display-mode:standalone),(display-mode:fullscreen){.swipe-preview{top:calc(66px + env(safe-area-inset-top))}}
+@media(prefers-reduced-motion:reduce){.launch-brand,.launch-track i,.launch-eyebrow,.launch-title,.launch-detail,.launch-progress i,.launch-speed-lines{animation:none!important}.launch-screen{transition:none}.swipe-preview{transition:none}.view.swipe-dragging{box-shadow:none}}

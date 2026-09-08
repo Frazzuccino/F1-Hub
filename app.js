@@ -22,7 +22,7 @@ const JINA = 'https://r.jina.ai/';
 const MOTORSPORT_STANDINGS = `https://www.motorsport.com/f1/standings/${YEAR}/`;
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const APP_VERSION = '1.16.0';
+const APP_VERSION = '1.17.0';
 const Q = globalThis.F1HubQuality;
 const CD = globalThis.F1HubCarDevelopment;
 const CAREER = globalThis.F1HubDriverCareer;
@@ -91,7 +91,7 @@ const state = {
   route:'home', schedule:[], drivers:[], constructors:[], photos:{}, wikiPhotos:{}, news:[], newsSource:'ALL', spoilerNewsRevealedRound:null, standingsSpoilerRevealedRound:null,
   penaltyPoints:{...FALLBACK_POINTS}, reprimands:{...FALLBACK_REPRIMANDS}, stewardDocs:{}, historyYear:YEAR-1, historyCache:{}, carUpdateDocs:{},
   loaded:false, refreshing:false, newsRefreshing:false, newsUpdatedAt:0, newsLatestArticleAt:0, standingsRefreshing:false, standingsUpdatedAt:0, driverStandingsRound:0, constructorStandingsRound:0, standingsDerivedRound:0, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null,
-  dataHealth:{}, favouriteDriver:localStorage.getItem('f1hub:favourite-driver')||'', favouriteTeam:localStorage.getItem('f1hub:favourite-team')||'', personalTheme:localStorage.getItem('f1hub:personal-theme')!=='off', lastRaceInsights:{}, updateAvailable:false, routeMotionPending:true, driverCareerCache:{}, weatherSessionByRound:{}, routeMotionDirection:''
+  dataHealth:{}, favouriteDriver:localStorage.getItem('f1hub:favourite-driver')||'', favouriteTeam:localStorage.getItem('f1hub:favourite-team')||'', personalTheme:localStorage.getItem('f1hub:personal-theme')!=='off', lastRaceInsights:{}, updateAvailable:false, routeMotionPending:true, driverCareerCache:{}, weatherSessionByRound:{}, calendarExpandedRound:'', routeMotionDirection:''
 };
 const view = document.getElementById('view');
 
@@ -168,7 +168,6 @@ function hydrateBaseFromCache(){
     const cs=cacheGet('constructors');
     const of1=cacheGet('photos');
     let news=cacheGet('news-combined');
-    // Migration/fallback for older builds that cached news per publisher rather than as one combined list.
     if(!Array.isArray(news)||!news.length){
       const legacy=[];
       for(const src of NEWS_SOURCES){
@@ -359,7 +358,6 @@ function googleNewsRss(src){
   const u=new URL('https://news.google.com/rss/search');
   u.searchParams.set('q',`Formula 1 site:${src.domain} when:1d`);
   u.searchParams.set('hl','en-GB');u.searchParams.set('gl','GB');u.searchParams.set('ceid','GB:en');
-  // A five-minute bucket changes the feed URL seen by rss2json, preventing an old converted feed being pinned for hours.
   u.searchParams.set('_f1hub',String(Math.floor(Date.now()/300000)));
   return u.toString();
 }
@@ -382,8 +380,6 @@ async function fetchPublisherItems(src,force=false){
   return settled.flatMap(x=>x.status==='fulfilled'?x.value:[]);
 }
 async function fetchRSSItems(src,force=false){
-  // Google News is queried per publisher and merged with the publisher's own feed.
-  // This gives us newly-indexed session/result stories even when a publisher RSS cache is delayed.
   const [googleItems,publisherItems]=await Promise.all([fetchGoogleNewsItems(src),fetchPublisherItems(src,force)]);
   const all=[...googleItems,...publisherItems];
   const seen=new Set();
@@ -399,7 +395,6 @@ async function loadNewsSources(force=false){
   const items=settled.flatMap(x=>x.status==='fulfilled'?x.value:[]);
   const seen=new Set();
   const fresh=items.sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0)).filter(n=>{const k=(n.link||n.title||'').replace(/\?.*$/,'').toLowerCase();if(!k||seen.has(k))return false;seen.add(k);return true;}).slice(0,80);
-  // Keep old stories only when every live source is unreachable; never overwrite fresh data with stale fallback data.
   if(fresh.length){
     state.news=fresh;cachePut('news-combined',fresh);state.newsUpdatedAt=Date.now();
     const newest=Math.max(...fresh.map(n=>new Date(n.pubDate||0).getTime()).filter(Number.isFinite));
@@ -422,8 +417,6 @@ async function loadBase(force=false){
   state.refreshing=true;
   if(force){['schedule','drivers','constructors','photos','wiki-photos-'+YEAR].forEach(k=>localStorage.removeItem('f1hub:'+k));}
 
-  // News is intentionally non-blocking during normal startup. It can involve many publisher/proxy
-  // requests, so waiting for it here made the whole PWA feel slow even when cached app data existed.
   state.newsRefreshing=true;
   const newsTask=loadNewsSources(force).catch(()=>{}).finally(()=>{state.newsRefreshing=false;if(state.route==='news')renderNews();});
   let standingsTask=Promise.resolve();
@@ -465,7 +458,6 @@ async function loadBase(force=false){
     standingsTask=refreshPostRaceStandings().then(()=>{if(['standings','home','drivers','teams'].includes(state.route))render();}).catch(()=>{});
     wikiTask=loadWikipediaPhotos(force).then(()=>{if(state.route==='drivers'||state.route.startsWith('driver:'))render();}).catch(()=>{});
 
-    // A manual refresh still waits for all visible data to finish. Routine app startup does not.
     if(force)await Promise.allSettled([newsTask,standingsTask,wikiTask]);
   } finally {
     state.refreshing=false;
@@ -574,8 +566,6 @@ async function deriveStandingsFromPreviousRound(targetRound){
     const dMismatch=expectedD.some(x=>currentD[driverCode(x.Driver)]!==Number(x.points||0));
     const cMismatch=expectedC.some(x=>currentC[teamStandingsKey(x.Constructor?.name)]!==Number(x.points||0));
     const sum=a=>a.reduce((n,x)=>n+Number(x.points||0),0),prevDTotal=sum(drows),prevCTotal=sum(crows),curDTotal=sum(state.drivers),curCTotal=sum(state.constructors);
-    // Only replace a current-round feed when it still has essentially the previous-round totals.
-    // If totals have changed but differ from our arithmetic (for example a later points penalty), trust the published current table.
     const dLooksStale=Number(state.driverStandingsRound||0)<round||Math.abs(curDTotal-prevDTotal)<0.01;
     const cLooksStale=Number(state.constructorStandingsRound||0)<round||Math.abs(curCTotal-prevCTotal)<0.01;
     const applyD=dMismatch&&dLooksStale,applyC=cMismatch&&cLooksStale;
@@ -594,12 +584,8 @@ async function refreshPostRaceStandings(){
   const [ds,cs]=await Promise.allSettled([fetchNoStoreJSON(`${JOLPICA}/${YEAR}/${round}/driverstandings/?limit=100&_=${Date.now()}`),fetchNoStoreJSON(`${JOLPICA}/${YEAR}/${round}/constructorstandings/?limit=100&_=${Date.now()}`)]);
   if(ds.status==='fulfilled'){const table=ds.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.DriverStandings||[],rr=Number(table.round||round),v=Q?.validateStandings(rows,{minEntries:18});if(v?.ok&&rr>=round){state.drivers=rows;state.driverStandingsRound=round;}}
   if(cs.status==='fulfilled'){const table=cs.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.ConstructorStandings||[],rr=Number(table.round||round),v=Q?.validateStandings(rows,{minEntries:8});if(v?.ok&&rr>=round){state.constructors=rows;state.constructorStandingsRound=round;}}
-  // In the hours after a race a standings endpoint can report the new round number while still
-  // carrying the previous points. Cross-check a separately published current standings table.
   if(recent||Number(state.driverStandingsRound||0)<round)await refreshDriversFromMotorsport(round,baseDriverRound);
   if(Number(state.driverStandingsRound||0)<round||Number(state.constructorStandingsRound||0)<round)await deriveStandingsThroughRound(round);
-  // Validate the new table against the previous official round plus this weekend's published points.
-  // This catches the common case where an upstream endpoint reports the new round number but still carries pre-race points.
   await deriveStandingsFromPreviousRound(round);
   if(Number(state.driverStandingsRound||0)>=round&&Number(state.constructorStandingsRound||0)>=round&&state.standingsDerivedRound!==round)state.standingsDerivedRound=0;
   state.standingsUpdatedAt=Date.now();
@@ -642,10 +628,6 @@ function parsePenaltyText(text){
   return out;
 }
 function parseReprimands(text){
-  // timepenalty's guide contains every reprimand from multiple seasons.
-  // Reprimands are championship/season-specific, so only count entries whose
-  // preceding record date belongs to the current season. Penalty points are
-  // handled separately because they use a rolling 12-month window.
   const map={};
   const names=state.drivers.map(x=>fullName(x.Driver));
   const lines=String(text||'').split(/\r?\n/);
@@ -800,26 +782,39 @@ function calendarMonthLabel(r){return new Intl.DateTimeFormat('en-GB',{timeZone:
 function openRaceFromCalendar(round,el){
   const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;if(!el||reduced){setRoute(`race:${round}`);return;}
   const list=el.closest('.calendar-list');list?.classList.add('is-navigating');el.classList.add('is-opening');
-  setTimeout(()=>setRoute(`race:${round}`),230);
+  setTimeout(()=>setRoute(`race:${round}`),180);
 }
 window.openRaceFromCalendar=openRaceFromCalendar;
+function focusCalendarRound(round){
+  state.calendarExpandedRound=String(round);renderRaces();
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    const el=document.getElementById(`calendar-round-${String(round)}`);if(!el)return;
+    el.classList.add('calendar-focus-pulse');
+    el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});
+    setTimeout(()=>el.classList.remove('calendar-focus-pulse'),900);
+  }));
+}
+window.focusCalendarRound=focusCalendarRound;
+function calendarSessionMini(r){
+  const ss=sessions(r);return ss.map(x=>`<span class="calendar-session-mini"><b>${esc(x.name)}</b><small>${fmtDate(x.iso,{weekday:'short',day:'numeric',month:'short'})} · ${fmtTime(x.iso)}</small></span>`).join('');
+}
 function calendarRaceCard(r){
-  const status=raceStatus(r),w=raceWinner(r),hideWinner=status==='DONE'&&isSpoilerRace(r),src=circuitSvg(r.Circuit.circuitId);
+  const status=raceStatus(r),w=raceWinner(r),hideWinner=status==='DONE'&&isSpoilerRace(r),src=circuitSvg(r.Circuit.circuitId),expanded=String(state.calendarExpandedRound||'')===String(r.round);
   const result=status==='DONE'?(hideWinner?'SPOILER HIDDEN':w?`WINNER · ${(w.Driver?.familyName||driverCode(w.Driver)).toUpperCase()}`:'RESULT AVAILABLE'):status==='NEXT'?'NEXT ROUND':'UPCOMING';
-  return `<button class="calendar-race status-${status.toLowerCase()}" onclick="openRaceFromCalendar('${esc(r.round)}',this)" aria-label="Open ${esc(r.raceName)}">
+  return `<div id="calendar-round-${esc(r.round)}" class="calendar-race clickable status-${status.toLowerCase()} ${expanded?'is-expanded':''}" role="button" tabindex="0" onclick="openRaceFromCalendar('${esc(r.round)}',this)" aria-label="Open ${esc(r.raceName)}">
     <span class="calendar-rail"><i></i><small>R${esc(r.round)}</small></span>
     <span class="calendar-copy"><span class="calendar-name">${flag(r.Circuit.Location.country)} ${esc(r.raceName)}</span><span class="calendar-place">${esc(r.Circuit.circuitName)} · ${esc(r.Circuit.Location.locality)}</span><span class="calendar-meta"><b>${fmtDate(raceIso(r),{day:'numeric',month:'short'})}</b><em>${esc(result)}</em></span></span>
     ${src?`<span class="calendar-track"><img src="${src}" alt="" loading="lazy"></span>`:''}<span class="calendar-arrow">›</span>
-  </button>`;
+    ${expanded?`<span class="calendar-expanded" onclick="event.stopPropagation()"><span class="calendar-expanded-title">WEEKEND SESSIONS</span><span class="calendar-session-strip">${calendarSessionMini(r)}</span><button class="external-btn red" onclick="event.stopPropagation();setRoute('race:${esc(r.round)}')">OPEN RACE HUB</button></span>`:''}
+  </div>`;
 }
 function renderRaces(){
   const completed=state.schedule.filter(r=>raceStatus(r)==='DONE').length,total=state.schedule.length,next=state.schedule.find(r=>raceStatus(r)==='NEXT')||state.schedule.find(r=>raceStatus(r)==='UPCOMING');
   let lastMonth='',cards='';for(const r of state.schedule){const m=calendarMonthLabel(r);if(m!==lastMonth){cards+=`<div class="calendar-month">${esc(m)}</div>`;lastMonth=m;}cards+=calendarRaceCard(r);}
   const pct=total?Math.round(100*completed/total):0;
-  view.innerHTML=titleBlock(`${YEAR} SEASON`,'Race Calendar',spoilerPill())+`<div class="calendar-overview card"><div><div class="eyebrow">SEASON PROGRESS</div><div class="calendar-progress-title"><b>${completed}</b><span>of ${total} rounds complete</span></div></div><div class="calendar-progress"><i style="width:${pct}%"></i></div>${next?`<div class="calendar-next"><small>NEXT</small><b>${flag(next.Circuit.Location.country)} ${esc(next.raceName)}</b><span>${fmtDate(raceIso(next),{weekday:'short',day:'numeric',month:'short'})}</span></div>`:''}</div><div class="calendar-list">${cards}</div>`;
+  view.innerHTML=titleBlock(`${YEAR} SEASON`,'Race Calendar',spoilerPill())+`<div class="calendar-overview card"><div><div class="eyebrow">SEASON PROGRESS</div><div class="calendar-progress-title"><b>${completed}</b><span>of ${total} rounds complete</span></div></div><div class="calendar-progress"><i style="width:${pct}%"></i></div>${next?`<button class="calendar-next" onclick="focusCalendarRound('${esc(next.round)}')" aria-label="Find ${esc(next.raceName)} in the calendar"><small>NEXT · TAP TO FIND</small><b>${flag(next.Circuit.Location.country)} ${esc(next.raceName)}</b><span>${fmtDate(raceIso(next),{weekday:'short',day:'numeric',month:'short'})}</span><i>↓</i></button>`:''}</div><div class="calendar-list">${cards}</div>`;
   if(!state.raceHistory)preloadRaceWinners(false);
 }
-
 function renderStandings(){
   const sr=spoilerRace(),guard=spoilerActive()&&sr&&raceSessionDone(sr)&&!standingsSpoilersRevealed();
   if(guard){view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Standings',spoilerPill())+`<div class="card spoiler-guard"><div class="eyebrow">SPOILER PROTECTED</div><div class="card-title">Post-race standings are hidden until tomorrow</div><div class="muted">You can reveal them now if you already know the race result.</div><div class="spacer"></div><button class="external-btn red" onclick="revealStandingsSpoilers()">REVEAL STANDINGS</button></div>`;return;}
@@ -885,25 +880,48 @@ function renderDrivers(){ view.innerHTML=titleBlock(`${YEAR} GRID`,'Drivers')+`<
 function driverCard(s){ const team=s.Constructors?.at(-1)?.name||'',imgs=driverPhotoUrls(s),img=imgs[0],fb=imgs[1]||'';return `<div class="card driver-card clickable ${isFavouriteDriver(s)?'is-favourite':''}" onclick="setRoute('driver:${s.Driver.driverId}')"><i class="team-strip" style="background:${teamColour(team)}"></i><div class="driver-photo-holder">${img?`<img class="driver-photo" src="${esc(img)}" data-fallback="${esc(fb)}" data-code="${esc(driverCode(s.Driver))}" onerror="driverPhotoError(this)" alt="${esc(fullName(s.Driver))}" loading="lazy">`:`<div class="avatar">${esc(driverCode(s.Driver))}</div>`}</div><div class="driver-copy"><div class="driver-code">#${esc(s.Driver.permanentNumber||'—')} · ${esc(driverCode(s.Driver))}</div><div class="driver-full">${esc(fullName(s.Driver))}</div><div class="driver-bottom"><span>${esc(team)}</span><span><b>${esc(s.points)}</b> pts</span></div></div></div>`; }
 function careerPageOffsets(total,pageSize=100){return CAREER?.pageOffsets(total,pageSize)||[0];}
 function buildDriverCareer(races,expectedTotal=0){return CAREER?.build(races,expectedTotal)||{starts:0,wins:0,podiums:0,best:null,seasons:[],teams:[],expectedTotal:Number(expectedTotal||0),complete:false};}
+function attachDriverCareerStandings(career,standings){return CAREER?.attachStandings?CAREER.attachStandings(career,standings):career;}
 function careerSpan(x){return x.first===x.last?String(x.first):`${x.first}–${x.last}`;}
 function driverCareerHtml(c){
   if(!c||!c.starts)return '<div class="card"><div class="empty">Career history is not available for this driver yet.</div></div>';
-  return `<div class="career-summary card"><div class="eyebrow">F1 CAREER</div><div class="facts career-facts"><div class="fact"><b>${c.starts}</b><small>GRANDS PRIX</small></div><div class="fact"><b>${c.wins}</b><small>WINS</small></div><div class="fact"><b>${c.podiums}</b><small>PODIUMS</small></div><div class="fact"><b>${c.best?`P${c.best}`:'—'}</b><small>BEST FINISH</small></div></div>${!c.complete?`<div class="career-warning">Archive incomplete · ${c.starts}/${c.expectedTotal} races loaded</div>`:''}</div><div class="spacer"></div><div class="card"><div class="eyebrow">TEAM HISTORY</div><div class="career-team-timeline">${c.teams.map(x=>`<div class="career-team-row"><i style="background:${teamColour(x.team)}"></i><div><b>${esc(x.team)}</b><span>${careerSpan(x)} · ${x.starts} Grands Prix</span></div></div>`).join('')}</div></div><div class="spacer"></div><div class="card"><div class="eyebrow">SEASON BY SEASON</div><div class="career-seasons">${c.seasons.map(x=>`<div class="career-season-row"><b>${x.season}</b><div><strong>${esc(x.teams.join(' → '))}</strong><span>${x.starts} GP${x.starts===1?'':'s'} · ${x.wins} win${x.wins===1?'':'s'} · ${x.podiums} podium${x.podiums===1?'':'s'}</span></div></div>`).join('')}</div></div><div class="source-note">Career history is built from every paginated Jolpica/Ergast Grand Prix result for the driver. Jolpica limits each response to 100 records, so F1 Hub follows MRData.total and requests every offset before calculating these totals.</div>`;
+  return `<div class="career-summary card"><div class="eyebrow">F1 CAREER</div><div class="facts career-facts"><div class="fact"><b>${c.starts}</b><small>GRANDS PRIX</small></div><div class="fact"><b>${c.wins}</b><small>WINS</small></div><div class="fact"><b>${c.podiums}</b><small>PODIUMS</small></div><div class="fact"><b>${c.best?`P${c.best}`:'—'}</b><small>BEST FINISH</small></div></div>${!c.complete?`<div class="career-warning">Archive incomplete · ${c.starts}/${c.expectedTotal} races loaded</div>`:''}</div><div class="spacer"></div><div class="card"><div class="eyebrow">TEAM HISTORY</div><div class="career-team-timeline">${c.teams.map(x=>`<div class="career-team-row"><i style="background:${teamColour(x.team)}"></i><div><b>${esc(x.team)}</b><span>${careerSpan(x)} · ${x.starts} Grands Prix</span></div></div>`).join('')}</div></div><div class="spacer"></div><div class="card"><div class="eyebrow">SEASON BY SEASON</div><div class="career-seasons">${c.seasons.map(x=>{const current=Number(x.season)===YEAR,pos=x.champPosition?`P${x.champPosition}`:'—';return `<div class="career-season-row"><b>${x.season}</b><div><strong>${esc(x.teams.join(' → '))}</strong><span>${x.starts} GP${x.starts===1?'':'s'} · ${x.wins} win${x.wins===1?'':'s'} · ${x.podiums} podium${x.podiums===1?'':'s'}</span></div><div class="career-season-finish ${x.champPosition?'known':''}"><b>${pos}</b><small>${current?'CURRENT':'CHAMPIONSHIP'}</small></div></div>`;}).join('')}</div></div><div class="source-note">Career race totals use every paginated Jolpica/Ergast Grand Prix result. Season finishing positions use the corresponding final driver standings table for each year; the current season is labelled CURRENT rather than final.</div>`;
 }
 async function fetchAllDriverCareerRaces(id){
   const pageSize=100,driver=encodeURIComponent(id),maxAge=30*60e3;
   const fetchPage=offset=>fetchJSON(`${JOLPICA}/drivers/${driver}/results/?limit=${pageSize}&offset=${offset}`,`driver-career-v2-${id}-${offset}`,maxAge,22000);
   const first=await fetchPage(0),total=Number(first?.MRData?.total||0),firstRows=first?.MRData?.RaceTable?.Races||[];
-  const offsets=careerPageOffsets(total,pageSize).filter(x=>x!==0);
-  const pages=await Promise.allSettled(offsets.map(fetchPage));
-  const rows=[...firstRows];
-  for(const p of pages)if(p.status==='fulfilled')rows.push(...(p.value?.MRData?.RaceTable?.Races||[]));
+  const offsets=careerPageOffsets(total,pageSize).filter(x=>x!==0),rows=[...firstRows];
+  for(let i=0;i<offsets.length;i+=2){
+    const pages=await Promise.allSettled(offsets.slice(i,i+2).map(fetchPage));
+    for(const page of pages)if(page.status==='fulfilled')rows.push(...(page.value?.MRData?.RaceTable?.Races||[]));
+    if(i+2<offsets.length)await sleep(480);
+  }
   return {races:rows,total};
+}
+async function fetchDriverSeasonPositions(id,seasons){
+  const out={},driver=encodeURIComponent(id),years=[...new Set((seasons||[]).map(x=>Number(x.season)).filter(Number.isFinite))].sort((a,b)=>b-a);
+  for(let i=0;i<years.length;i++){
+    const year=years[i],key=`driver-season-standing-v1-${id}-${year}`,maxAge=year===YEAR?15*60e3:30*864e5;
+    try{
+      const wasCached=!!cacheGet(key,maxAge);
+      const j=await fetchJSON(`${JOLPICA}/${year}/drivers/${driver}/driverstandings/`,key,maxAge,18000);
+      const row=j?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings?.[0];
+      if(row)out[String(year)]={position:Number(row.position)||null,points:row.points,wins:row.wins};
+      if(!wasCached&&i<years.length-1)await sleep(430);
+    }catch{}
+  }
+  return out;
 }
 async function loadDriverCareerInto(id){
   const root=document.getElementById('driver-career');if(!root)return;
-  try{let career=state.driverCareerCache[id];if(!career){const all=await fetchAllDriverCareerRaces(id);career=buildDriverCareer(all.races,all.total);state.driverCareerCache[id]=career;}if(document.getElementById('driver-career'))root.innerHTML=driverCareerHtml(career);}
-  catch{if(document.getElementById('driver-career'))root.innerHTML='<div class="card"><div class="empty">Career history could not be loaded right now.</div></div>';}
+  try{
+    let career=state.driverCareerCache[id];
+    if(!career){const all=await fetchAllDriverCareerRaces(id);career=buildDriverCareer(all.races,all.total);state.driverCareerCache[id]=career;}
+    if(document.getElementById('driver-career'))root.innerHTML=driverCareerHtml(career);
+    const standings=await fetchDriverSeasonPositions(id,career.seasons);
+    career=attachDriverCareerStandings(career,standings);state.driverCareerCache[id]=career;
+    const live=document.getElementById('driver-career');if(live)live.innerHTML=driverCareerHtml(career);
+  }catch{if(document.getElementById('driver-career'))root.innerHTML='<div class="card"><div class="empty">Career history could not be loaded right now.</div></div>';}
 }
 function renderDriver(id){ const s=state.drivers.find(x=>x.Driver.driverId===id);if(!s)return setRoute('drivers');const d=s.Driver,team=s.Constructors?.at(-1)?.name||'',imgs=driverPhotoUrls(s),img=imgs[0],fb=imgs[1]||'';view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('drivers')">← DRIVERS</button></div><div class="spacer"></div><div class="card driver-profile-card" style="overflow:hidden"><div class="driver-profile-hero" style="border-left-color:${teamColour(team)}"><div class="driver-profile-copy"><div class="eyebrow">#${esc(d.permanentNumber||'—')} · ${esc(driverCode(d))}</div><h1>${esc(fullName(d))}</h1><div class="muted">${esc(d.nationality)} · ${esc(team)}</div></div><div class="profile-photo-holder">${img?`<img src="${esc(img)}" data-fallback="${esc(fb)}" data-code="${esc(driverCode(d))}" onerror="driverPhotoError(this)" alt="${esc(fullName(d))}">`:`<div class="avatar profile-avatar">${esc(driverCode(d))}</div>`}</div></div><div class="driver-profile-stats"><div class="facts"><div class="fact"><b>${esc(s.position)}</b><small>CHAMP POS</small></div><div class="fact"><b>${esc(s.points)}</b><small>POINTS</small></div><div class="fact"><b>${esc(s.wins)}</b><small>${YEAR} WINS</small></div><div class="fact"><b>${age(d.dateOfBirth)}</b><small>AGE</small></div><div class="fact"><b>${fmtDate(d.dateOfBirth+'T12:00:00Z',{day:'numeric',month:'short',year:'numeric'})}</b><small>BORN</small></div><div class="fact"><b>${esc(d.nationality)}</b><small>NATIONALITY</small></div></div></div></div><div class="spacer"></div>${titleBlock('HISTORY','Career')}<div id="driver-career"><div class="loader">Loading F1 career…</div></div><div class="spacer"></div><div class="actions"><a class="external-btn" href="${esc(d.url||'#')}" target="_blank" rel="noopener">PROFILE SOURCE ↗</a></div>`;loadDriverCareerInto(id); }
 
@@ -975,8 +993,6 @@ async function initRainRadar(r){
     L.circleMarker([lat,lon],{radius:4,color:'#fff',weight:2,fillColor:'#ff1e1e',fillOpacity:1}).addTo(map);
     setTimeout(()=>map.invalidateSize(),80);
 
-    // Georeferenced WGS84 circuit path: the outline keeps the real-world
-    // orientation/location while the map is panned or zoomed.
     try{
       const geo=await fetchJSON(CIRCUIT_GEOJSON,'circuit-geojson',30*864e5,22000),feature=nearestCircuitFeature(geo,r);
       if(feature){
@@ -1172,7 +1188,6 @@ async function renderSessionResult(round,key){
   }catch{root.innerHTML='<div class="card"><div class="empty">Classification has not been published on the free feed yet. Try Refresh shortly after the session.</div></div>';}
 }
 
-// v1.6.0 — FIA car updates + post-session telemetry
 function normaliseRaceText(v){
   return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
 }
@@ -1263,81 +1278,81 @@ function carTeamSlug(name){return String(name||'team').toLowerCase().replace(/[^
 function carSchematicSvg(team,updates){
   const mapped=CD?.mapUpdates(updates)||updates.map((u,i)=>({...u,map:{id:'unmapped',label:'Location not mapped',confidence:'LOW'},mapIndex:i+1}));
   const accent=teamColour(team),seen={};
-  const markers=mapped.flatMap(u=>(u.maps?.length?u.maps:[u.map]).filter(z=>z?.top||z?.side).map(z=>({u,z}))).map(({u,z})=>{
-    const id=z.id,slot=seen[id]||0;seen[id]=slot+1;const d=(slot%3-1)*10;
+  const markers=mapped.flatMap(u=>(u.maps?.length?u.maps:[u.map]).filter(z=>z?.perspective).map(z=>({u,z}))).map(({u,z})=>{
+    const id=z.id,slot=seen[id]||0;seen[id]=slot+1;const d=(slot%3-1)*12,pt=z.perspective;
     const ref=`car-${carTeamSlug(team)}-${u.mapIndex}`,title=`${u.mapIndex}. ${u.component} — ${z.label}`;
-    const one=(pt,side=false)=>pt?`<g class="car-marker ${side?'side-marker':''}" role="button" tabindex="0" onclick="focusCarUpdate('${ref}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();focusCarUpdate('${ref}')}"><title>${esc(title)}</title><circle cx="${pt[0]+d}" cy="${pt[1]+(side?d/4:d)}" r="13"></circle><text x="${pt[0]+d}" y="${pt[1]+(side?d/4:d)+4}">${u.mapIndex}</text></g>`:'';
-    return one(z.top)+one(z.side,true);
+    return `<g class="car-marker perspective-marker" role="button" tabindex="0" onclick="focusCarUpdate('${ref}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();focusCarUpdate('${ref}')}"><title>${esc(title)}</title><circle cx="${pt[0]+d}" cy="${pt[1]+d/5}" r="14"></circle><text x="${pt[0]+d}" y="${pt[1]+d/5+4}">${u.mapIndex}</text></g>`;
   }).join('');
-  return `<svg class="car-schematic car-schematic-v2" viewBox="0 0 1000 470" role="img" aria-label="Detailed Formula 1 car schematic showing ${mapped.filter(x=>x.maps?.length||x.map.id!=='unmapped').length} mapped update locations for ${esc(team)}" style="--car-accent:${accent}">
-    <defs>
-      <linearGradient id="carGrid-${carTeamSlug(team)}" x1="0" x2="1"><stop offset="0" stop-color="#0b0b0b"/><stop offset="1" stop-color="#080808"/></linearGradient>
-    </defs>
-    <rect x="0" y="0" width="1000" height="470" fill="url(#carGrid-${carTeamSlug(team)})" rx="20"/>
-    <g class="grid-lines" opacity=".14">
-      <path d="M30 56 H970 M30 230 H970 M30 415 H970"/>
-      <path d="M210 30 V210 M500 30 V210 M790 30 V210"/>
-      <path d="M205 250 V432 M500 250 V432 M795 250 V432"/>
-    </g>
-    <g class="car-view top-view">
-      <text class="view-label" x="34" y="28">TOP VIEW</text>
-      <path class="outline" d="M54 119 L100 104 L160 104 L165 92 L192 92 L192 146 L165 146 L160 135 L100 135 L54 122"/>
-      <path class="outline" d="M171 117 L262 109 L340 99 L374 105 L374 136 L340 143 L262 133 L171 125"/>
-      <path class="detail" d="M177 121 H334"/>
-      <path class="detail" d="M195 117 L245 120 L287 120"/>
-      <rect class="tyre tyre-top" x="260" y="48" width="72" height="49" rx="14"/>
-      <rect class="tyre tyre-top" x="260" y="143" width="72" height="49" rx="14"/>
-      <path class="suspension" d="M297 97 L352 112 M297 143 L352 128 M319 97 L362 113 M319 143 L362 127"/>
-      <path class="outline" d="M356 88 Q412 65 504 63 H606 Q688 65 753 86 L815 101 H872 V140 H815 L753 155 Q688 178 606 180 H504 Q412 178 356 155 Z"/>
-      <path class="inner-outline" d="M404 93 Q446 76 512 76 H595 Q650 79 696 97 L737 116 L696 135 Q650 153 595 156 H512 Q446 156 404 142 Z"/>
-      <path class="cockpit-shape" d="M443 106 Q471 81 506 81 Q547 82 573 107 Q549 138 506 149 Q470 144 443 124 Z"/>
-      <path class="halo-shape" d="M457 107 Q482 89 506 106 M457 124 Q482 142 506 124 M506 106 L530 122"/>
-      <path class="airbox" d="M552 90 L582 102 L590 119 L582 136 L552 147 Q545 119 552 90 Z"/>
-      <path class="detail" d="M382 157 Q510 184 719 155"/>
-      <path class="detail" d="M379 86 Q516 56 721 86"/>
-      <rect class="tyre tyre-top" x="734" y="43" width="84" height="54" rx="15"/>
-      <rect class="tyre tyre-top" x="734" y="142" width="84" height="54" rx="15"/>
-      <path class="suspension" d="M691 98 L755 92 M691 142 L755 148 M707 108 L779 92 M707 132 L779 148"/>
-      <path class="outline" d="M669 106 L759 98 L843 102 L875 112 L875 128 L843 138 L759 142 L669 133 Z"/>
-      <path class="detail" d="M817 104 L902 104"/>
-      <path class="detail" d="M817 136 L902 136"/>
-      <path class="rear-wing-main" d="M874 88 H963 V104 H874 Z"/>
-      <path class="rear-wing-main" d="M874 136 H963 V152 H874 Z"/>
-      <rect class="endplate" x="960" y="78" width="10" height="84" rx="3"/>
-      <path class="car-highlight-line" d="M53 119 H156 M173 119 H372 M374 87 Q533 48 820 103 M820 137 Q533 202 374 157 M874 120 H966"/>
-    </g>
-    <g class="car-view side-view">
-      <text class="view-label" x="34" y="247">SIDE VIEW</text>
-      <path class="outline" d="M58 379 L145 369 L185 356 L262 346 L331 337 L382 316 L432 307 L489 300 L560 296 L626 300 L700 307 L742 312 L777 324 L777 356 L303 362 L136 360 Z"/>
-      <path class="detail" d="M61 378 Q211 352 390 329 Q585 292 744 315"/>
-      <path class="floor-side" d="M171 379 H823 L846 390 H159 Z"/>
-      <path class="aero-surface front-wing-side" d="M45 370 L152 361 L189 367 L177 378 L50 385 Z"/>
-      <rect class="endplate" x="43" y="347" width="11" height="40" rx="3"/>
-      <circle class="tyre" cx="282" cy="353" r="48"/>
-      <circle class="wheel-core" cx="282" cy="353" r="21"/>
-      <circle class="wheel-hub" cx="282" cy="353" r="7"/>
-      <circle class="tyre" cx="776" cy="349" r="51"/>
-      <circle class="wheel-core" cx="776" cy="349" r="22"/>
-      <circle class="wheel-hub" cx="776" cy="349" r="7"/>
-      <path class="inner-outline" d="M416 320 Q500 299 602 305 L646 322 L636 348 H422 L408 336 Z"/>
-      <path class="cockpit-shape" d="M421 310 Q454 259 512 264 Q552 267 576 290 L552 311 L443 317 Z"/>
-      <path class="halo-shape" d="M444 303 Q469 255 510 270 Q532 277 542 299 M479 270 V311"/>
-      <path class="airbox" d="M524 269 L554 238 L585 247 L599 286 L554 289 Z"/>
-      <path class="engine-cover" d="M564 276 Q645 265 724 307 L734 326 L650 327 L608 301 Z"/>
-      <path class="suspension" d="M235 330 L282 308 M236 356 L282 395 M704 320 L776 299 M704 355 L776 399"/>
-      <path class="detail" d="M445 346 Q520 331 642 332"/>
-      <path class="diffuser-shape" d="M716 355 L838 352 L853 385 L806 388 L742 377 Z"/>
-      <path class="beam-wing-line" d="M804 320 Q851 305 894 313"/>
-      <path class="rear-wing-main" d="M829 264 H952 L945 278 H837 Z"/>
-      <path class="rear-wing-main" d="M842 290 H950 L946 304 H848 Z"/>
-      <rect class="rear-wing-element" x="868" y="255" width="18" height="112" rx="4"/>
-      <path class="car-highlight-line" d="M61 378 Q200 350 390 329 Q571 287 733 313 M329 361 H840"/>
+  return `<svg class="car-schematic car-schematic-v3" viewBox="0 0 1000 610" role="img" aria-label="Three-quarter technical Formula 1 car schematic showing ${mapped.filter(x=>x.maps?.length||x.map.id!=='unmapped').length} mapped update locations for ${esc(team)}" style="--car-accent:${accent}">
+    <defs><radialGradient id="techBg-${carTeamSlug(team)}" cx="48%" cy="53%" r="67%"><stop offset="0" stop-color="#141414"/><stop offset="1" stop-color="#070707"/></radialGradient></defs>
+    <rect width="1000" height="610" rx="22" fill="url(#techBg-${carTeamSlug(team)})"/>
+    <g class="tech-grid" opacity=".16"><path d="M50 94 H950 M50 520 H950 M120 65 V548 M500 65 V548 M880 65 V548"/></g>
+    <text class="view-label" x="42" y="42">TECHNICAL 3/4 VIEW</text>
+    <g class="car-perspective">
+      <!-- rear wing and upper body -->
+      <path class="outline heavy rear-wing-main" d="M720 188 L930 170 L950 207 L739 228 Z"/>
+      <path class="inner-outline" d="M738 197 L919 183 L927 196 L746 214 Z"/>
+      <path class="outline rear-wing-element" d="M752 215 L767 322 M920 191 L900 317"/>
+      <path class="detail" d="M773 246 L889 239 M785 265 L883 258"/>
+      <!-- rear wheel and suspension -->
+      <ellipse class="tyre" cx="824" cy="374" rx="92" ry="111" transform="rotate(-5 824 374)"/>
+      <ellipse class="wheel-core" cx="824" cy="374" rx="47" ry="61" transform="rotate(-5 824 374)"/>
+      <ellipse class="wheel-hub" cx="824" cy="374" rx="11" ry="14"/>
+      <path class="suspension" d="M721 331 L812 310 M710 378 L808 438 M732 349 L817 337 M727 400 L811 414"/>
+      <!-- engine cover / airbox -->
+      <path class="outline" d="M511 279 Q568 211 666 218 Q732 222 776 272 L748 328 L657 339 L574 324 Z"/>
+      <path class="inner-outline" d="M566 276 Q625 241 702 250 Q733 254 752 275"/>
+      <path class="outline airbox" d="M562 247 L588 192 L627 198 L643 244 Z"/>
+      <path class="detail" d="M594 204 L614 207 L622 235"/>
+      <!-- cockpit and halo -->
+      <path class="outline cockpit-shape" d="M410 322 Q443 254 522 250 Q570 251 601 286 L570 324 L484 348 Z"/>
+      <path class="halo-shape" d="M430 311 Q449 251 501 252 Q546 254 563 299 M470 257 L481 327 M434 313 L557 300"/>
+      <path class="detail" d="M439 306 Q487 280 548 296"/>
+      <!-- sidepod and floor -->
+      <path class="outline sidepod-shape" d="M503 344 Q575 306 671 315 L730 347 L704 420 Q620 442 512 421 L472 383 Z"/>
+      <path class="inner-outline" d="M526 352 Q589 327 653 332 L697 349 L675 371 L542 374 Z"/>
+      <path class="detail cooling-louvre" d="M621 319 L663 326 M615 327 L674 336 M609 336 L683 346"/>
+      <path class="outline floor-shape" d="M348 410 L493 390 L714 422 L858 455 L828 484 L548 470 L365 447 Z"/>
+      <path class="detail" d="M466 401 L542 418 L694 433 M487 414 L548 435 L682 449"/>
+      <path class="car-highlight-line" d="M352 407 Q466 382 578 397 Q697 413 838 465"/>
+      <!-- front-right wheel prominent -->
+      <ellipse class="tyre" cx="510" cy="421" rx="87" ry="112" transform="rotate(6 510 421)"/>
+      <ellipse class="wheel-core" cx="510" cy="421" rx="43" ry="60" transform="rotate(6 510 421)"/>
+      <ellipse class="wheel-hub" cx="510" cy="421" rx="10" ry="14"/>
+      <!-- front-left wheel -->
+      <ellipse class="tyre" cx="278" cy="409" rx="72" ry="97" transform="rotate(-9 278 409)"/>
+      <ellipse class="wheel-core" cx="278" cy="409" rx="35" ry="51" transform="rotate(-9 278 409)"/>
+      <ellipse class="wheel-hub" cx="278" cy="409" rx="9" ry="12"/>
+      <!-- front suspension -->
+      <path class="suspension" d="M308 345 L435 374 M301 438 L435 405 M335 356 L455 383 M330 427 L452 399"/>
+      <path class="suspension" d="M241 348 L373 369 M238 449 L371 414"/>
+      <!-- nose -->
+      <path class="outline heavy" d="M112 438 L208 407 L337 364 L447 348 L465 383 L350 405 L221 448 L119 465 Z"/>
+      <path class="inner-outline" d="M177 433 L326 382 L425 365"/>
+      <path class="detail" d="M207 423 L321 391 M224 443 L349 401"/>
+      <!-- front wing, multiple elements -->
+      <path class="outline heavy front-wing" d="M48 468 Q142 443 247 449 L286 472 Q169 479 57 497 Z"/>
+      <path class="outline front-wing" d="M55 489 Q154 466 276 471 L290 488 Q160 495 65 514 Z"/>
+      <path class="outline front-wing" d="M78 514 Q166 494 282 494 L271 510 Q166 515 88 530 Z"/>
+      <path class="outline endplate" d="M47 454 L63 448 L79 522 L62 531 Z"/>
+      <path class="outline endplate" d="M277 450 L298 456 L296 505 L278 510 Z"/>
+      <path class="detail" d="M106 471 L92 500 M143 461 L128 495 M197 455 L181 487"/>
+      <!-- mirror / pod and floor fences -->
+      <path class="outline" d="M402 332 Q418 311 443 315 L446 334 Q421 340 402 332 Z"/>
+      <path class="detail" d="M405 337 L390 355"/>
+      <path class="outline" d="M387 391 L408 372 L426 379 L408 405 Z M418 405 L437 384 L453 390 L437 416 Z"/>
+      <!-- diffuser / beam wing -->
+      <path class="outline diffuser-shape" d="M732 430 L878 444 L910 478 L829 486 L746 463 Z"/>
+      <path class="detail" d="M779 448 L866 464 M797 438 L884 454"/>
+      <path class="outline" d="M748 310 Q820 284 884 301 L880 317 Q818 307 755 329 Z"/>
+      <!-- accent tracing -->
+      <path class="car-highlight-line" d="M51 469 Q156 443 247 451 M116 439 L339 365 M416 321 Q457 253 522 252 M512 344 Q624 301 730 347 M722 189 L931 171"/>
     </g>${markers}
   </svg>`;
 }
 function carMappingSummaryHtml(team,updates){
   const summary=CD?.mappingSummary(updates)||{coverage:0,known:0,total:updates.length,high:0,mapped:updates.map((u,i)=>({...u,map:{id:'unmapped',label:'Location not mapped',confidence:'LOW'},mapIndex:i+1}))};
-  return `<div class="car-map-card"><div class="car-map-head"><div><div class="eyebrow">UPDATE LOCATION MAP</div><div class="card-title">${esc(team)} schematic</div></div><span class="map-coverage ${summary.coverage===100?'complete':''}">${summary.known}/${summary.total} mapped</span></div>${carSchematicSvg(team,updates)}<div class="map-note">Component locations are mapped from the FIA component name/description onto a detailed generic 2026-style F1 silhouette. It shows approximate physical location, not team CAD geometry.</div></div>`;
+  return `<div class="car-map-card"><div class="car-map-head"><div><div class="eyebrow">UPDATE LOCATION MAP</div><div class="card-title">${esc(team)} schematic</div></div><span class="map-coverage ${summary.coverage===100?'complete':''}">${summary.known}/${summary.total} mapped</span></div>${carSchematicSvg(team,updates)}<div class="map-note">Component locations are mapped from the FIA component name/description onto a reference-style three-quarter F1 technical drawing. It shows approximate physical location, not team CAD geometry.</div></div>`;
 }
 function focusCarUpdate(id){const el=document.getElementById(id);if(!el)return;el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});el.classList.remove('update-flash');void el.offsetWidth;el.classList.add('update-flash');setTimeout(()=>el.classList.remove('update-flash'),1000);}
 function filterCarUpdateTeams(team){document.querySelectorAll('[data-update-team]').forEach(el=>el.classList.toggle('hidden',team!=='ALL'&&el.dataset.updateTeam!==team));document.querySelectorAll('[data-car-filter]').forEach(b=>b.classList.toggle('active',b.dataset.carFilter===team));}
@@ -1407,7 +1422,6 @@ function lapSelectOptions(laps,driverNumber,selected){
 function rangeUrl(endpoint,sessionKey,driverNumber,start,end){
   const u=new URL(`${OPENF1}/${endpoint}`);
   u.searchParams.set('session_key',sessionKey);u.searchParams.set('driver_number',driverNumber);
-  // OpenF1's own examples use date> / date< for telemetry windows.
   u.searchParams.set('date>',start);u.searchParams.set('date<',end);
   return u.toString();
 }
@@ -1416,7 +1430,6 @@ function telemetryFetchJSON(url,key,maxAge=7*864e5,timeoutMs=35000){
   const fresh=cacheGet(key,maxAge);if(fresh&&(!Array.isArray(fresh)||fresh.length))return Promise.resolve(fresh);
   if(Array.isArray(fresh)&&!fresh.length){try{localStorage.removeItem('f1hub:'+key);}catch{}}
   const run=async()=>{
-    // Stay comfortably below OpenF1's 3 req/s free-tier limit.
     const gap=Math.max(0,650-(Date.now()-telemetryLastRequest));if(gap)await sleep(gap);
     telemetryLastRequest=Date.now();
     let lastErr;
@@ -1426,7 +1439,6 @@ function telemetryFetchJSON(url,key,maxAge=7*864e5,timeoutMs=35000){
         const r=await fetch(url,{signal:c.signal,cache:'no-store'});clearTimeout(timer);
         if(!r.ok){const e=new Error(String(r.status));e.status=r.status;if(r.status===429)e.retryAfter=Number(r.headers.get('Retry-After')||0);throw e;}
         const data=await r.json();
-        // Never cache an empty telemetry response: new post-session data can appear later.
         if(!Array.isArray(data)||data.length)cachePut(key,data);
         return data;
       }catch(e){
@@ -1469,7 +1481,6 @@ function buildTelemetrySeries(car,loc,startMs){
 function telemetryWindow(lap){
   const exactStart=new Date(lap.date_start).getTime();if(!Number.isFinite(exactStart))throw new Error('lap start missing');
   const duration=Math.max(20,Number(lap.lap_duration)||120),exactEnd=exactStart+duration*1000;
-  // date_start is explicitly documented by OpenF1 as approximate, so ask for a generous window.
   return {exactStart,exactEnd,duration,queryStart:exactStart-45000,queryEnd:exactEnd+45000};
 }
 function sliceTelemetryRows(rows,startMs,endMs){return (rows||[]).filter(x=>{const t=new Date(x.date).getTime();return Number.isFinite(t)&&t>=startMs&&t<=endMs;});}
@@ -1489,8 +1500,6 @@ async function fetchLapTelemetry(sessionKey,driverNumber,lap){
   try{car=await telemetryFetchJSON(rangeUrl('car_data',sessionKey,driverNumber,s,e),`${key}-car`,7*864e5);}catch(e){const st=Number(e?.status||e?.message);if(st===401||st===402||st===403)throw e;}
   try{loc=await telemetryFetchJSON(rangeUrl('location',sessionKey,driverNumber,s,e),`${key}-loc`,7*864e5);}catch{}
 
-  // The lap start timestamp is approximate. Align to the nearest actual telemetry sample
-  // rather than requiring the samples to fall inside a tiny timestamp window.
   car=lapRowsFromFullSession(car,w.exactStart,w.duration);
   loc=lapRowsFromFullSession(loc,w.exactStart,w.duration);
 
@@ -1522,8 +1531,6 @@ function archiveSessionAliases(s){
   return [archiveNorm(s.openName||s.name)];
 }
 async function officialArchiveSession(r,s){
-  // Prefer F1's own yearly index. If that host is blocked for this browser/network,
-  // use the public live relay's archive index only to discover the official session path.
   let idx=null;
   try{idx=await archiveFetchJSON(`${F1_ARCHIVE}/${YEAR}/Index.json`,25000);}catch{}
   if(!idx){
@@ -1545,8 +1552,6 @@ async function officialArchiveSession(r,s){
 }
 function archiveProxyUrl(url){return `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;}
 async function archiveFetchText(url,timeoutMs=90000){
-  // The F1 static archive is sometimes 403-blocked by network/IP. Try it directly first,
-  // then a free CORS read-through for public static text. No credentials are sent.
   const candidates=[url];
   if(String(url).startsWith(`${F1_ARCHIVE}/`))candidates.push(archiveProxyUrl(url));
   let lastErr=null;
@@ -1590,7 +1595,6 @@ function archivePayloadUtc(obj,kind){
   return null;
 }
 async function archiveTimeOffset(lines,kind){
-  // Some sessions take a little longer before the first payload carrying an absolute UTC.
   for(let i=0;i<Math.min(lines.length,600);i++){
     const meta=archiveLineMeta(lines[i]);if(!meta)continue;
     try{const obj=await inflateArchivePayload(meta.b64),utc=archivePayloadUtc(obj,kind),ms=new Date(utc).getTime();if(Number.isFinite(ms))return ms-meta.elapsed;}catch{}
@@ -1675,8 +1679,6 @@ function deltaChart(a,b,names,lapA,lapB){
   const durA=Number(lapA?.lap_duration),durB=Number(lapB?.lap_duration),useOfficial=Number.isFinite(durA)&&durA>0&&Number.isFinite(durB)&&durB>0;
   const pts=[];for(let i=0;i<=100;i++){const p=i/100,ta=useOfficial?normalisedElapsed(a,p,durA):interpElapsed(a,p),tb=useOfficial?normalisedElapsed(b,p,durB):interpElapsed(b,p);if(Number.isFinite(ta)&&Number.isFinite(tb))pts.push({p,delta:ta-tb});}
   if(!pts.length)return '';
-  // Anchor the comparison to the official selected-lap durations. Telemetry timestamps
-  // are only approximate and can otherwise shift the entire delta trace above/below zero.
   if(useOfficial){const start=pts[0].delta;for(const pt of pts)pt.delta-=start;pts[0].delta=0;pts.at(-1).delta=durA-durB;}
   const finish=pts.at(-1).delta,mx=Math.max(.05,...pts.map(x=>Math.abs(x.delta))),W=720,H=210,path=chartPath(pts,x=>x.delta,-mx,mx,W,H);
   const zero=H/2,finishText=`${finish>0?'+':''}${finish.toFixed(3)} s`;
@@ -1720,9 +1722,6 @@ function telemetrySummary(series,lap,name){
   return `<div class="card telemetry-summary"><div class="eyebrow">${esc(name)}</div><div class="facts"><div class="fact"><b>${formatLapSeconds(lap.lap_duration)}</b><small>LAP</small></div><div class="fact"><b>${Math.round(top)} km/h</b><small>TOP SPEED</small></div><div class="fact"><b>${Math.round(min)} km/h</b><small>MIN SPEED</small></div><div class="fact"><b>${full}%</b><small>FULL THROTTLE</small></div><div class="fact"><b>${brake}%</b><small>BRAKING SAMPLES</small></div><div class="fact"><b>L${esc(lap.lap_number)}</b><small>SELECTED LAP</small></div></div></div>`;
 }
 async function fetchTelemetryComparisonSmart(r,s,os,requests,onProgress){
-  // OpenF1 is the lightest historical source, but its free tier is unavailable during
-  // the global live window. Always try F1's official post-session CarData/Position archive
-  // if OpenF1 is locked, empty or temporarily unavailable — including for 2026.
   let openErr=null;
   try{
     onProgress?.(0,1,'openf1-a');
@@ -1980,7 +1979,7 @@ function compareSummaryCard(a,b,h){
 }
 function renderCompare(){
   const opts=state.drivers.map(s=>`<option value="${esc(s.Driver.driverId)}">${esc(fullName(s.Driver))}</option>`).join('');
-  view.innerHTML=titleBlock(`${YEAR} SEASON`,'Driver Compare')+`<div class="card"><div class="grid two"><label><div class="eyebrow">DRIVER A</div><select id="cmp-a">${opts}</select></label><label><div class="eyebrow">DRIVER B</div><select id="cmp-b">${opts}</select></label></div><div class="spacer"></div><button id="cmp-go" class="external-btn red">COMPARE</button></div><div id="cmp-out" class="spacer"></div>`;
+  view.innerHTML=`<div class="compare-page" data-no-swipe>${titleBlock(`${YEAR} SEASON`,'Driver Compare')}<div class="card"><div class="grid two"><label><div class="eyebrow">DRIVER A</div><select id="cmp-a">${opts}</select></label><label><div class="eyebrow">DRIVER B</div><select id="cmp-b">${opts}</select></label></div><div class="spacer"></div><button id="cmp-go" class="external-btn red">COMPARE</button></div><div id="cmp-out" class="spacer"></div></div>`;
   const a=document.getElementById('cmp-a'),b=document.getElementById('cmp-b');b.selectedIndex=Math.min(1,b.options.length-1);
   document.getElementById('cmp-go').onclick=async()=>{
     const out=document.getElementById('cmp-out');
@@ -2053,50 +2052,28 @@ function setupPullToRefresh(){
 }
 
 function setupSwipeNavigation(){
-  let startX=0,startY=0,lastX=0,lastT=0,velocityX=0,tracking=false,horizontal=false,frame=0,target=null;
+  let startX=0,startY=0,lastX=0,lastT=0,velocityX=0,tracking=false,horizontal=false,frame=0,target=null,visualSerial=0,snapshot=null,finishTimer=0;
   const preview=document.createElement('div');preview.className='swipe-preview';preview.setAttribute('aria-hidden','true');document.getElementById('app-shell')?.insertBefore?.(preview,view);
-  const paint=(dx,tgt)=>{
-    cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{
-      const width=Math.max(1,window.innerWidth),edge=tgt?Math.max(-width,Math.min(width,dx)):dx*.16,progress=Math.min(1,Math.abs(edge)/width);
-      view.classList.add('swipe-dragging');view.style.transition='none';view.style.transform=`translate3d(${edge}px,0,0)`;
-      if(tgt){const meta=SWIPE_META[tgt]||['',''];preview.innerHTML=`<span>${meta[0]}</span><b>${meta[1]}</b><small>RELEASE TO OPEN</small>`;preview.classList.add('show');preview.classList.toggle('from-right',dx<0);preview.classList.toggle('from-left',dx>0);preview.style.setProperty('--swipe-progress',String(progress));}
-      else{preview.classList.remove('show');}
-    });
-  };
-  const clean=()=>{cancelAnimationFrame(frame);tracking=false;horizontal=false;target=null;window.__f1SwipeActive=false;view.classList.remove('swipe-dragging');view.style.transition='';view.style.transform='';preview.className='swipe-preview';preview.style.removeProperty('--swipe-progress');};
-  const cancelSwipe=()=>{view.style.transition='transform .22s cubic-bezier(.2,.82,.2,1)';view.style.transform='translate3d(0,0,0)';preview.classList.remove('show');setTimeout(clean,230);};
+  const stopVisual=()=>{visualSerial++;clearTimeout(finishTimer);if(snapshot){snapshot.remove();snapshot=null;}view.style.transition='none';view.style.transform='';view.classList.remove('swipe-dragging');preview.className='swipe-preview';preview.style.removeProperty('--swipe-progress');};
+  const resetGesture=()=>{cancelAnimationFrame(frame);tracking=false;horizontal=false;target=null;velocityX=0;window.__f1SwipeActive=false;view.classList.remove('swipe-dragging');};
+  const paint=(dx,tgt)=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{const width=Math.max(1,window.innerWidth),edge=tgt?Math.max(-width,Math.min(width,dx)):dx*.16,progress=Math.min(1,Math.abs(edge)/width);view.classList.add('swipe-dragging');view.style.transition='none';view.style.transform=`translate3d(${edge}px,0,0)`;if(tgt){const meta=SWIPE_META[tgt]||['',''];preview.innerHTML=`<span>${meta[0]}</span><b>${meta[1]}</b><small>RELEASE TO OPEN</small>`;preview.classList.add('show');preview.classList.toggle('from-right',dx<0);preview.classList.toggle('from-left',dx>0);preview.style.setProperty('--swipe-progress',String(progress));}else preview.classList.remove('show');});};
+  const cancelSwipe=()=>{const id=++visualSerial;resetGesture();view.style.transition='transform .14s cubic-bezier(.2,.82,.2,1)';view.style.transform='translate3d(0,0,0)';preview.classList.remove('show');finishTimer=setTimeout(()=>{if(id!==visualSerial)return;view.style.transition='none';view.style.transform='';preview.className='swipe-preview';},150);};
+  const makeSnapshot=()=>{const rect=view.getBoundingClientRect(),snap=view.cloneNode(true);snap.removeAttribute('id');snap.querySelectorAll('[id]').forEach(x=>x.removeAttribute('id'));snap.className='swipe-snapshot';snap.style.top=`${Math.max(0,rect.top)}px`;snap.style.height=`${Math.max(120,window.innerHeight-Math.max(0,rect.top)-72)}px`;snap.style.transform=view.style.transform||'translate3d(0,0,0)';document.body.appendChild(snap);return snap;};
   const commitSwipe=(route,dx)=>{
-    const width=Math.max(320,window.innerWidth),dir=dx<0?-1:1;
-    view.style.transition='transform .18s cubic-bezier(.4,0,1,1)';view.style.transform=`translate3d(${dir*width}px,0,0)`;preview.classList.add('committing');
-    setTimeout(()=>{
-      state.route=route;state.routeMotionDirection='';if(location.hash!==`#${encodeURIComponent(route)}`)history.pushState({route},'',`#${encodeURIComponent(route)}`);
-      document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',route===b.dataset.route));window.scrollTo({top:0,behavior:'instant'});
-      view.style.transition='none';view.style.transform=`translate3d(${-dir*Math.min(90,width*.16)}px,0,0)`;render();preview.classList.remove('show','committing');
-      requestAnimationFrame(()=>requestAnimationFrame(()=>{view.style.transition='transform .24s cubic-bezier(.16,.9,.22,1)';view.style.transform='translate3d(0,0,0)';setTimeout(clean,250);}));
-      if(route==='news'&&!state.news.length&&!state.newsRefreshing)setTimeout(()=>refreshNewsOnly(true),0);
-    },175);
+    const dir=dx<0?-1:1,id=++visualSerial,width=Math.max(320,window.innerWidth);clearTimeout(finishTimer);if(snapshot)snapshot.remove();snapshot=makeSnapshot();resetGesture();preview.classList.remove('show');
+    state.route=route;state.routeMotionDirection='';if(location.hash!==`#${encodeURIComponent(route)}`)history.pushState({route},'',`#${encodeURIComponent(route)}`);document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',route===b.dataset.route));window.scrollTo({top:0,behavior:'instant'});
+    view.style.transition='none';view.style.transform=`translate3d(${-dir*Math.min(72,width*.12)}px,0,0)`;render();
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{if(id!==visualSerial)return;view.style.transition='transform .15s cubic-bezier(.16,.9,.22,1)';view.style.transform='translate3d(0,0,0)';if(snapshot){snapshot.style.transition='transform .15s cubic-bezier(.4,0,.2,1),opacity .15s ease';snapshot.style.transform=`translate3d(${dir*width}px,0,0)`;snapshot.style.opacity='0';}finishTimer=setTimeout(()=>{if(id!==visualSerial)return;if(snapshot){snapshot.remove();snapshot=null;}view.style.transition='none';view.style.transform='';},165);}));
+    if(route==='news'&&!state.news.length&&!state.newsRefreshing)setTimeout(()=>refreshNewsOnly(true),0);
   };
   window.addEventListener('touchstart',e=>{
-    if(!TOP_LEVEL_ROUTES.includes(state.route)||e.touches?.length!==1)return;
-    if(e.target?.closest?.('a,button,input,select,textarea,.tabs,.news-source-tabs,.weather-session-tabs,.leaflet-container,.car-schematic,[data-no-swipe]'))return;
-    const p=e.touches[0];startX=lastX=p.clientX;startY=p.clientY;lastT=performance.now();velocityX=0;tracking=true;horizontal=false;target=null;
+    if(!TOP_LEVEL_ROUTES.includes(state.route)||e.touches?.length!==1)return;if(e.target?.closest?.('a,button,input,select,textarea,.tabs,.news-source-tabs,.weather-session-tabs,.leaflet-container,.car-schematic,[data-no-swipe]'))return;
+    stopVisual();const p=e.touches[0];startX=lastX=p.clientX;startY=p.clientY;lastT=performance.now();velocityX=0;tracking=true;horizontal=false;target=null;
   },{passive:true});
-  window.addEventListener('touchmove',e=>{
-    if(!tracking||!e.touches?.length)return;const p=e.touches[0],dx=p.clientX-startX,dy=p.clientY-startY;
-    if(!horizontal){if(Math.abs(dx)<6&&Math.abs(dy)<6)return;if(Math.abs(dx)<=Math.abs(dy)*1.04){tracking=false;return;}horizontal=true;window.__f1SwipeActive=true;view.classList.add('swipe-dragging');}
-    e.preventDefault();target=swipeTarget(state.route,dx);const now=performance.now(),moveDt=Math.max(8,now-lastT);velocityX=(p.clientX-lastX)/moveDt;lastX=p.clientX;lastT=now;paint(dx,target);
-  },{passive:false});
-  window.addEventListener('touchend',e=>{
-    if(!tracking){if(horizontal)cancelSwipe();return;}
-    const p=e.changedTouches?.[0],endX=p?.clientX??lastX,endY=p?.clientY??startY,dx=endX-startX,dy=endY-startY;
-    const width=Math.max(320,window.innerWidth),quickTarget=target||swipeTarget(state.route,dx),velocityGuess=Math.abs(velocityX)||Math.abs(dx)/Math.max(1,performance.now()-lastT);
-    const mostlyHorizontal=Math.abs(dx)>Math.abs(dy)*1.02;
-    const commit=quickTarget&&mostlyHorizontal&&(Math.abs(dx)>=Math.min(88,width*.19)||(Math.abs(dx)>=28&&velocityGuess>.32));
-    if(commit)commitSwipe(quickTarget,dx);else cancelSwipe();
-  },{passive:true});
+  window.addEventListener('touchmove',e=>{if(!tracking||!e.touches?.length)return;const p=e.touches[0],dx=p.clientX-startX,dy=p.clientY-startY;if(!horizontal){if(Math.abs(dx)<5&&Math.abs(dy)<5)return;if(Math.abs(dx)<=Math.abs(dy)*1.08){tracking=false;return;}horizontal=true;window.__f1SwipeActive=true;view.classList.add('swipe-dragging');}e.preventDefault();target=swipeTarget(state.route,dx);const now=performance.now(),moveDt=Math.max(6,now-lastT);velocityX=.65*velocityX+.35*((p.clientX-lastX)/moveDt);lastX=p.clientX;lastT=now;paint(dx,target);},{passive:false});
+  window.addEventListener('touchend',e=>{if(!tracking){if(horizontal)cancelSwipe();return;}const p=e.changedTouches?.[0],endX=p?.clientX??lastX,endY=p?.clientY??startY,dx=endX-startX,dy=endY-startY,width=Math.max(320,window.innerWidth),quickTarget=target||swipeTarget(state.route,dx),elapsed=Math.max(1,performance.now()-lastT),velocityGuess=Math.max(Math.abs(velocityX),Math.abs(endX-lastX)/elapsed,Math.abs(dx)/Math.max(1,performance.now()-(lastT-16))),mostlyHorizontal=Math.abs(dx)>Math.abs(dy)*1.04,commit=quickTarget&&mostlyHorizontal&&(Math.abs(dx)>=Math.min(78,width*.17)||(Math.abs(dx)>=24&&velocityGuess>.28));if(commit)commitSwipe(quickTarget,dx);else cancelSwipe();},{passive:true});
   window.addEventListener('touchcancel',()=>{if(tracking||horizontal)cancelSwipe();},{passive:true});
 }
-
 function enhanceAccessibility(){
   view.querySelectorAll('.clickable[onclick],.steward-link[onclick]').forEach(el=>{if(el.tagName==='BUTTON'||el.tagName==='A')return;if(!el.hasAttribute('role'))el.setAttribute('role','button');if(!el.hasAttribute('tabindex'))el.tabIndex=0;if(!el.dataset.keyReady){el.dataset.keyReady='1';el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();el.click();}});}});
 }
@@ -2134,7 +2111,6 @@ function showLaunchSequence(short=false){
     showLaunchSequence._hideTimer=setTimeout(()=>{el.classList.add('hidden');document.body.classList.remove('launch-revealing');},hideMs);
   },displayMs);
 }
-// Navigation / lifecycle
 window.setRoute=setRoute;
 window.refreshNewsOnly=refreshNewsOnly;
 state.route=decodeURIComponent(location.hash.slice(1)||'home');
@@ -2148,7 +2124,6 @@ function updateInstallUI(){
 }
 async function requestInstall(){
   if(isAppInstalled()){updateInstallUI();return;}
-  // Pick up an event captured by the early <head> listener, if present.
   if(!state.installPrompt && window.__f1InstallPrompt) state.installPrompt=window.__f1InstallPrompt;
   if(!state.installPrompt){
     toast('Install prompt not ready — refresh once');
@@ -2199,7 +2174,6 @@ if(!navigator.onLine){document.getElementById('connection-pill').textContent='OF
 updateInstallUI();
 setupPullToRefresh();
 setupSwipeNavigation();
-// Android PWAs are often resumed from memory rather than reloaded. Refresh news when the app becomes visible again.
 let newsBackgroundedAt=Date.now();
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden){newsBackgroundedAt=Date.now();return;}
@@ -2211,7 +2185,6 @@ document.addEventListener('visibilitychange',()=>{
 window.addEventListener('pageshow',()=>{if(state.loaded&&Date.now()-(state.newsUpdatedAt||0)>3*60e3)refreshNewsOnly(true);if(state.loaded&&latestCompletedRace()&&Date.now()-(state.standingsUpdatedAt||0)>5*60e3)refreshChampionshipOnly();});
 setInterval(()=>{if(!document.hidden&&state.loaded&&Date.now()-(state.newsUpdatedAt||0)>10*60e3)refreshNewsOnly(true);},60e3);
 setInterval(()=>{if(!document.hidden)checkForUpdate();},15*60e3);
-// Paint cached content immediately, then refresh it without blocking startup.
 hydrateBaseFromCache();
 applyPersonalTheme();
 showLaunchSequence(false);

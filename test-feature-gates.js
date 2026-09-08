@@ -19,7 +19,7 @@ scores.push(gate('Car Development parsing & mapping',[
  ['combined components can map twice',()=>CD.matchZones({component:'Floor Edge and Diffuser'}).length===2],
  ['unknown components remain honest',()=>CD.matchZone({component:'Mystery Device'}).id==='unmapped'],
  ['official source link retained',()=>app.includes('OFFICIAL FIA DOCUMENT ↗')],
- ['detailed F1 silhouette includes halo/suspension/wings',()=>app.includes('car-schematic-v2')&&app.includes('halo-shape')&&app.includes('suspension')&&app.includes('rear-wing-main')]
+ ['reference-style three-quarter car includes halo/suspension/wings',()=>app.includes('car-schematic-v3')&&app.includes('car-perspective')&&app.includes('halo-shape')&&app.includes('suspension')&&app.includes('rear-wing-main')]
 ]));
 
 scores.push(gate('Favourite cleanup',[
@@ -41,6 +41,9 @@ scores.push(gate('Swipe navigation',[
  ['touchstart tracked',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes("addEventListener('touchstart'")],
  ['touchmove follows finger with translate3d',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('translate3d(${edge}px,0,0)')],
  ['touchend commits adjacent route',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('commitSwipe(quickTarget,dx)')],
+ ['completed swipe releases gesture state immediately',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('resetGesture();preview.classList.remove')],
+ ['old swipe visual can be interrupted by next touch',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('stopVisual();const p=e.touches[0]')],
+ ['outgoing page snapshot gives continuous transition',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('makeSnapshot()')&&css.includes('.swipe-snapshot')],
  ['edge resistance only applies beyond navigation edge',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('dx*.16')],
  ['interactive controls excluded',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('a,button,input,select,textarea')],
  ['weather tabs excluded',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('.weather-session-tabs')],
@@ -70,6 +73,8 @@ scores.push(gate('Driver career history',[
  ['team history timeline',()=>section('function driverCareerHtml','async function loadDriverCareerInto').includes('TEAM HISTORY')],
  ['team tenure year span',()=>app.includes('function careerSpan')],
  ['season-by-season timeline',()=>section('function driverCareerHtml','async function loadDriverCareerInto').includes('SEASON BY SEASON')],
+ ['season rows show championship position',()=>section('function driverCareerHtml','async function fetchAllDriverCareerRaces').includes('career-season-finish')&&section('function driverCareerHtml','async function fetchAllDriverCareerRaces').includes('CHAMPIONSHIP')],
+ ['season positions come from driver standings endpoint',()=>section('async function fetchDriverSeasonPositions','async function loadDriverCareerInto').includes('/driverstandings/')],
  ['mid-season team arrows',()=>section('function driverCareerHtml','async function loadDriverCareerInto').includes("join(' → ')")],
  ['career load has error fallback',()=>section('async function loadDriverCareerInto','function renderDriver(id)').includes('Career history could not be loaded')]
 ]));
@@ -91,6 +96,8 @@ scores.push(gate('Race Calendar redesign',[
  ['season progress overview',()=>app.includes('calendar-overview')],
  ['progress bar',()=>app.includes('calendar-progress')],
  ['next-race summary',()=>app.includes('calendar-next')],
+ ['next-race summary scrolls to main calendar round',()=>app.includes('function focusCalendarRound')&&section('function renderRaces','function renderStandings').includes('focusCalendarRound')],
+ ['focused calendar round expands session details',()=>app.includes('calendar-expanded')&&app.includes('calendarSessionMini')],
  ['month grouping',()=>app.includes('calendarMonthLabel')&&app.includes('calendar-month')],
  ['timeline rail',()=>app.includes('calendar-rail')&&css.includes('.calendar-list:before')],
  ['track silhouette in cards',()=>section('function calendarRaceCard','function renderRaces').includes('calendar-track')],

@@ -1,34 +1,36 @@
-# F1 Hub v1.16.0 — update / install
+# F1 Hub v1.17.0 — update / install
 
 ## Update GitHub Pages
 
-Replace the files in your existing F1 Hub repository with everything in this folder, keeping the files at the repository root.
+Replace the files in your existing F1 Hub GitHub Pages repository with everything in this folder, keeping the files at the repository root.
 
-Open the deployed app once with:
+For this upgrade, open the deployed app once with:
 
-`?v=1150`
+`?v=1170`
 
-In **More**, the footer should show **F1 Hub v1.16.0**.
+In **More**, the footer should show **F1 Hub v1.17.0**.
 
-## Main changes in v1.16.0
+## Main changes in v1.17.0
 
-- Replaced the previous abstract Car Development drawing with a much more detailed top/side 2026-style F1 car schematic.
-- Remapped technical update markers to the new car geometry.
-- Rebuilt left/right page swiping so the page follows the finger directly, supports flick velocity, and reveals the destination section underneath.
-- Removed My F1 from the Home screen. My F1 remains at the bottom of More and can still control the app theme and Car Development preference.
-- Fixed driver career stats by paging through every Jolpica result instead of silently stopping at 100.
-- Career panels now explicitly report full Grand Prix totals and warn if an archive page fails to load.
-- Added a race-weekend-aware opening animation showing the live/next round and next session.
-- The launch animation can also appear after returning to the app following a long background period.
+- Replaced the previous Car Development top/side silhouette with a visibly different three-quarter technical F1 drawing.
+- Added dedicated three-quarter marker coordinates for FIA update locations.
+- The NEXT card on Race Calendar now scrolls to, expands and highlights the corresponding round in the main calendar.
+- Driver season history now includes championship position for each year, using Jolpica driver standings.
+- Driver career archive requests are rate-limit friendly as well as fully paginated.
+- Driver Compare explicitly supports vertical touch scrolling on long comparison pages.
+- Reworked swipe transitions so a second swipe can start immediately after the first; stale transition cleanup no longer cancels the next gesture.
 
 ## Testing
 
-Run `RUN-TESTS.bat` on Windows with Node installed, or run:
+On Windows with Node installed, run:
 
-`node tests/test-quality.js`
+`RUN-TESTS.bat`
 
-and:
+or manually run:
 
-`node tests/runtime-smoke.js`
+- `node tests/test-quality.js`
+- `node tests/test-feature-gates.js`
+- `node tests/runtime-smoke.js`
+- `node tests/swipe-repeat-smoke.js`
 
-The release target is 100% automated checks and a minimum 9/10 score for every requested feature group.
+The release acceptance target is 100% automated checks and at least 9/10 for every requested feature group.

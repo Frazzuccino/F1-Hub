@@ -6,7 +6,7 @@ global.F1HubDriverCareer=require('../driver-career-core.js');
 const dummy=()=>({
   textContent:'',className:'',innerHTML:'',dataset:{},style:{setProperty(){},removeProperty(){}},classList:{add(){},remove(){},toggle(){},contains(){return false}},
   addEventListener(){},removeEventListener(){},querySelector(){return null},querySelectorAll(){return []},closest(){return null},appendChild(){},insertBefore(){},remove(){},setAttribute(){},hasAttribute(){return false},
-  get value(){return this._value||''},set value(v){this._value=v},options:[],disabled:false
+  scrollIntoView(){this.scrolled=true},get value(){return this._value||''},set value(v){this._value=v},options:[],disabled:false
 });
 const elems=new Map();['view','toast','connection-pill','refresh-btn','brand-btn','install-app-btn','install-sheet','install-now','install-later','update-banner','update-now','pull-indicator','app-shell','launch-screen'].forEach(id=>elems.set(id,dummy()));
 global.document={
@@ -21,7 +21,7 @@ global.DOMParser=class{parseFromString(){return {querySelector(){return null},ge
 global.fetch=async()=>{throw new Error('offline smoke')};
 global.AbortController=class{constructor(){this.signal={}}abort(){}};
 global.setInterval=()=>0;global.clearInterval=()=>{};global.setTimeout=()=>0;global.clearTimeout=()=>{};
-global.requestAnimationFrame=(fn)=>fn();global.cancelAnimationFrame=()=>{};
+global.requestAnimationFrame=(fn)=>fn();global.cancelAnimationFrame=()=>{};global.CSS={escape:s=>String(s)};
 try{
   const code=fs.readFileSync(path.join(__dirname,'..','app.js'),'utf8');vm.runInThisContext(code,{filename:'app.js'});
 
@@ -186,7 +186,7 @@ The vane improves aerodynamic performance.
 
   const none=vm.runInThisContext("parseCarPresentation('Aston Martin Aramco F1 Team\\nNo updates submitted for this event.')");if(none.teams.length!==1||!none.teams[0].noUpdates)throw new Error('FIA no-update team parser failed');
   const carHtml=vm.runInThisContext("carUpdatesHtml(parseCarPresentation('Mercedes\\n| 1 | Front Wing | Circuit specific | Revised flap | Lower drag |'),{url:'https://fia.example/doc.pdf'})");
-  if(!carHtml.includes('TOP VIEW')||!carHtml.includes('SIDE VIEW')||!carHtml.includes('car-schematic-v2')||!carHtml.includes('halo-shape')||!carHtml.includes('Front wing'))throw new Error('detailed car schematic render failed');
+  if(!carHtml.includes('TECHNICAL 3/4 VIEW')||!carHtml.includes('car-schematic-v3')||!carHtml.includes('car-perspective')||!carHtml.includes('halo-shape')||!carHtml.includes('Front wing'))throw new Error('three-quarter car schematic render failed');
 
   const theme=vm.runInThisContext("(()=>{state.favouriteTeam='McLaren';state.personalTheme=true;applyPersonalTheme();return favouriteTeamName();})()");if(theme!=='McLaren')throw new Error('My F1 theme runtime failed');
   const standingsHtml=vm.runInThisContext("standingRow({position:'1',points:'100',wins:'2',Driver:{code:'AAA',familyName:'Alpha'},Constructors:[{name:'McLaren'}]})");
@@ -194,6 +194,7 @@ The vane improves aerodynamic performance.
 
   const career=vm.runInThisContext("buildDriverCareer([{season:'2019',round:'1',Results:[{position:'10',Constructor:{name:'Toro Rosso'}}]},{season:'2019',round:'12',Results:[{position:'5',Constructor:{name:'Red Bull'}}]},{season:'2020',round:'1',Results:[{position:'3',Constructor:{name:'Red Bull'}}]}])");
   if(career.teams.length!==2||career.seasons.find(x=>x.season===2019)?.teams.join('>')!=='Toro Rosso>Red Bull')throw new Error('driver career team history failed');
+  const careerWithPos=global.F1HubDriverCareer.attachStandings(career,{'2019':{position:8,points:'92'},'2020':{position:7,points:'105'}});if(careerWithPos.seasons.find(x=>x.season===2019)?.champPosition!==8)throw new Error('driver career championship position attach failed');
   const offsets=vm.runInThisContext('careerPageOffsets(393,100)');if(JSON.stringify(offsets)!=='[0,100,200,300]')throw new Error('career pagination offsets failed: '+JSON.stringify(offsets));
 
   const sw1=vm.runInThisContext("swipeTarget('races',-120)"),sw2=vm.runInThisContext("swipeTarget('standings',120)"),edge=vm.runInThisContext("swipeTarget('home',120)");
@@ -219,7 +220,10 @@ The vane improves aerodynamic performance.
     const weatherHtml=weatherCard(state.schedule[0]);
     return {races,more,standings,news,weatherHtml};
   })()`);
-  if(!rendered.races.includes('calendar-overview')||!rendered.races.includes('calendar-race'))throw new Error('race calendar render smoke failed');
+  if(!rendered.races.includes('calendar-overview')||!rendered.races.includes('calendar-race')||!rendered.races.includes('focusCalendarRound'))throw new Error('race calendar render smoke failed');
+  const expandedCalendar=vm.runInThisContext("(()=>{state.calendarExpandedRound='2';renderRaces();return view.innerHTML})()");if(!expandedCalendar.includes('calendar-expanded')||!expandedCalendar.includes('OPEN RACE HUB'))throw new Error('calendar next-round expansion render failed');
+  vm.runInThisContext("focusCalendarRound('2')");if(vm.runInThisContext('state.calendarExpandedRound')!=='2')throw new Error('calendar focus state failed');
+  const careerHtml=vm.runInThisContext("driverCareerHtml(F1HubDriverCareer.attachStandings(buildDriverCareer([{season:'2019',round:'1',Results:[{position:'5',Constructor:{name:'Team'}}]}],1),{'2019':{position:6,points:'90'}}))");if(!careerHtml.includes('P6')||!careerHtml.includes('CHAMPIONSHIP'))throw new Error('career season championship finish render failed');
   if(rendered.more.includes('>Teams<')||rendered.more.indexOf('My F1')<rendered.more.indexOf('Data Health'))throw new Error('More hierarchy render smoke failed');
   if(rendered.standings.includes('is-favourite')||rendered.standings.includes('★'))throw new Error('standings neutral render smoke failed');
   if(rendered.news.includes('MYF1')||rendered.news.includes('MY F1'))throw new Error('news cleanup render smoke failed');

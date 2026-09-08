@@ -29,5 +29,13 @@
     const expected=Math.max(0,Number(expectedTotal)||0);
     return {starts:rows.length,wins,podiums,best:Number.isFinite(best)?best:null,debut:rows[0]||null,last:rows.at(-1)||null,seasons:[...seasons.values()].sort((a,b)=>b.season-a.season),teams:[...teams.values()].sort((a,b)=>a.first-b.first||a.team.localeCompare(b.team)),expectedTotal:expected,complete:!expected||rows.length>=expected};
   }
-  return {pageOffsets,build};
+  function attachStandings(career,standingsBySeason){
+    if(!career)return career;
+    const by=standingsBySeason||{};
+    return {...career,seasons:(career.seasons||[]).map(s=>{
+      const row=by[String(s.season)]||by[s.season]||null;
+      return {...s,champPosition:row?.position?Number(row.position):null,champPoints:row?.points??null,champWins:row?.wins??null};
+    })};
+  }
+  return {pageOffsets,build,attachStandings};
 });

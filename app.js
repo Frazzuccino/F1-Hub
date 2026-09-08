@@ -22,7 +22,8 @@ const JINA = 'https://r.jina.ai/';
 const MOTORSPORT_STANDINGS = `https://www.motorsport.com/f1/standings/${YEAR}/`;
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const APP_VERSION = '1.11.10';
+const APP_VERSION = '1.12.0';
+const Q = globalThis.F1HubQuality;
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -84,19 +85,11 @@ const FALLBACK_POINTS = {
 };
 const FALLBACK_REPRIMANDS = {'Gabriel Bortoleto':1,'Oliver Bearman':1,'Alex Albon':2,'Nico Hulkenberg':1,'Carlos Sainz':1,'Lewis Hamilton':1,'Kimi Antonelli':1,'Sergio Perez':2,'Liam Lawson':1,'George Russell':1};
 
-// Emergency post-race snapshot used only when live championship sources are still lagging.
-// Round 13 values are the published standings after the 2026 Italian Grand Prix.
-const BUNDLED_STANDINGS_SNAPSHOTS = {
-  13:{
-    drivers:{ANT:[267,7],RUS:[201,2],HAM:[191,1],NOR:[171,2],LEC:[155,1],VER:[127,0],PIA:[116,0],HAD:[71,0],LAW:[51,0],GAS:[41,0],LIN:[29,0],COL:[21,0],BEA:[18,0],BOR:[10,0],HUL:[6,0],SAI:[6,0],ALB:[5,0],OCO:[3,0],ALO:[3,0],TSU:[1,0],STR:[0,0],BOT:[0,0],PER:[0,0]},
-    constructors:{mercedes:[468,9],ferrari:[346,2],mclaren:[287,2],redbull:[204,0],racingbulls:[75,0],alpine:[62,0],haas:[21,0],audi:[16,0],williams:[11,0],astonmartin:[3,0],cadillac:[0,0]}
-  }
-};
-
 const state = {
   route:'home', schedule:[], drivers:[], constructors:[], photos:{}, wikiPhotos:{}, news:[], newsSource:'ALL', spoilerNewsRevealedRound:null, standingsSpoilerRevealedRound:null,
   penaltyPoints:{...FALLBACK_POINTS}, reprimands:{...FALLBACK_REPRIMANDS}, stewardDocs:{}, historyYear:YEAR-1, historyCache:{}, carUpdateDocs:{},
-  loaded:false, refreshing:false, newsRefreshing:false, newsUpdatedAt:0, newsLatestArticleAt:0, standingsRefreshing:false, standingsUpdatedAt:0, driverStandingsRound:0, constructorStandingsRound:0, standingsDerivedRound:0, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null
+  loaded:false, refreshing:false, newsRefreshing:false, newsUpdatedAt:0, newsLatestArticleAt:0, standingsRefreshing:false, standingsUpdatedAt:0, driverStandingsRound:0, constructorStandingsRound:0, standingsDerivedRound:0, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null,
+  dataHealth:{}, favouriteDriver:localStorage.getItem('f1hub:favourite-driver')||'', favouriteTeam:localStorage.getItem('f1hub:favourite-team')||'', lastRaceInsights:{}, updateAvailable:false
 };
 const view = document.getElementById('view');
 
@@ -118,6 +111,28 @@ function age(dob){ if(!dob)return '—'; const d=new Date(dob+'T12:00:00Z'),n=ne
 function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),1800); }
 function cacheGet(key,maxAge){ try{const x=JSON.parse(localStorage.getItem('f1hub:'+key)); if(!x)return null;if(maxAge && Date.now()-x.t>maxAge)return null;return x.v;}catch{return null;} }
 function cachePut(key,v){ try{localStorage.setItem('f1hub:'+key,JSON.stringify({t:Date.now(),v}));}catch{} return v; }
+function cacheStamp(key){try{return JSON.parse(localStorage.getItem('f1hub:'+key)||'null')?.t||0;}catch{return 0;}}
+function markHealth(key,status,source,updatedAt=Date.now(),detail='',round=0,maxAgeMs=30*60e3){state.dataHealth[key]={key,status,source,updatedAt,detail,round:Number(round||0),maxAgeMs};}
+function healthState(rec){if(!rec)return 'unknown';if(rec.status==='error')return 'error';const f=Q?.freshness(rec.updatedAt,rec.maxAgeMs)||{state:'unknown'};return f.state;}
+function healthLabel(rec){if(!rec)return 'Not checked';if(rec.status==='error')return rec.detail||'Unavailable';const age=Q?.ageLabel(rec.updatedAt)||'unknown';return `${rec.source||'Source'} · ${age}`;}
+function healthIcon(rec){const st=healthState(rec);return st==='fresh'?'✓':st==='aging'?'~':st==='stale'?'!':st==='error'?'×':'?';}
+function currentDataHealthScore(){const vals=Object.values(state.dataHealth);if(!vals.length)return 0;return Math.round(vals.reduce((a,r)=>a+(Q?.freshness(r.updatedAt,r.maxAgeMs)?.score||20),0)/vals.length);}
+function saveFavourite(kind,value){if(kind==='driver'){state.favouriteDriver=value;localStorage.setItem('f1hub:favourite-driver',value||'');}else{state.favouriteTeam=value;localStorage.setItem('f1hub:favourite-team',value||'');}render();toast('Preferences saved');}
+function favouriteDriverStanding(){return state.drivers.find(s=>s.Driver.driverId===state.favouriteDriver)||null;}
+function favouriteCard(){
+  const s=favouriteDriverStanding();
+  if(!s)return `<div class="card favourite-card"><div class="eyebrow">MY F1</div><div class="card-title">Choose a favourite driver</div><div class="muted">Pin your driver and team to Home for instant championship context.</div><div class="spacer"></div><button class="external-btn" onclick="setRoute('preferences')">SET FAVOURITES</button></div>`;
+  const leader=state.drivers[0],gap=Math.max(0,Number(leader?.points||0)-Number(s.points||0)),team=s.Constructors?.at(-1)?.name||'';
+  return `<div class="card favourite-card" style="border-left:5px solid ${teamColour(team)}"><div class="eyebrow">MY F1 · ${esc(driverCode(s.Driver))}</div><div class="favourite-head"><div><div class="card-title">${esc(fullName(s.Driver))}</div><div class="muted">${esc(team)} · P${esc(s.position)} · ${esc(s.points)} pts</div></div><b class="favourite-pos">P${esc(s.position)}</b></div><div class="favourite-gap">${Number(s.position)===1?'Championship leader':`${gap} pts from championship lead`}</div><div class="spacer"></div><div class="actions"><button class="external-btn" onclick="setRoute('driver:${esc(s.Driver.driverId)}')">DRIVER PROFILE</button><button class="external-btn" onclick="setRoute('preferences')">CHANGE</button></div></div>`;
+}
+function freshnessStrip(){
+  const items=[['Schedule',state.dataHealth.schedule],['Standings',state.dataHealth.standings],['News',state.dataHealth.news]];
+  return `<button class="freshness-strip" onclick="setRoute('datahealth')" aria-label="Open data health">${items.map(([n,r])=>`<span class="health-${healthState(r)}"><b>${healthIcon(r)}</b>${esc(n)}</span>`).join('')}<small>DATA HEALTH ›</small></button>`;
+}
+function downloadTextFile(name,text,type='text/plain'){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);}
+function icsDate(iso){return new Date(iso).toISOString().replace(/[-:]/g,'').replace(/\.\d{3}Z$/,'Z');}
+function shareText(title,text){if(navigator.share){navigator.share({title,text,url:location.href}).catch(()=>{});return;}navigator.clipboard?.writeText(`${text} ${location.href}`).then(()=>toast('Copied to clipboard')).catch(()=>toast('Share unavailable'));}
+function addRaceWeekendCalendar(round){const r=state.schedule.find(x=>String(x.round)===String(round));if(!r)return;const events=sessions(r).map(s=>`BEGIN:VEVENT\r\nUID:f1hub-${YEAR}-${r.round}-${s.key}@f1hub\r\nDTSTAMP:${icsDate(new Date().toISOString())}\r\nDTSTART:${icsDate(s.iso)}\r\nSUMMARY:F1 ${r.raceName} — ${s.name}\r\nDESCRIPTION:F1 Hub race-weekend session (UK time shown in app)\r\nBEGIN:VALARM\r\nTRIGGER:-PT30M\r\nACTION:DISPLAY\r\nDESCRIPTION:${s.name} starts in 30 minutes\r\nEND:VALARM\r\nEND:VEVENT`).join('\r\n');downloadTextFile(`F1-${YEAR}-R${r.round}-${r.Circuit.circuitId}.ics`,`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//F1 Hub//EN\r\n${events}\r\nEND:VCALENDAR`,'text/calendar');toast('Calendar file created');}
 
 function hydrateBaseFromCache(){
   try{
@@ -144,8 +159,9 @@ function hydrateBaseFromCache(){
     if(cs){const table=cs?.MRData?.StandingsTable||{};const rows=table.StandingsLists?.[0]?.ConstructorStandings||[];if(rows.length){state.constructors=rows;state.constructorStandingsRound=Number(table.round||0);}}
     if(Array.isArray(of1)&&of1.length)state.photos=Object.fromEntries(of1.filter(x=>x.name_acronym).map(x=>[x.name_acronym,x]));
     if(Array.isArray(news)&&news.length){state.news=news;const newest=Math.max(...news.map(n=>new Date(n.pubDate||0).getTime()).filter(Number.isFinite));state.newsLatestArticleAt=Number.isFinite(newest)?newest:0;}
-    // A bundled just-completed-round snapshot can correct a stale cached standings table instantly.
-    const latest=latestCompletedRace();if(latest)applyBundledStandingsSnapshot(Number(latest.round||0));
+    if(state.schedule.length)markHealth('schedule','ok','Jolpica cache',cacheStamp('schedule'),'Cached season calendar',0,60*60e3);
+    if(state.drivers.length&&state.constructors.length)markHealth('standings','ok','Jolpica cache',Math.max(cacheStamp('drivers'),cacheStamp('constructors')),'Cached championship table',Math.min(state.driverStandingsRound,state.constructorStandingsRound),30*60e3);
+    if(state.news.length)markHealth('news','ok','News cache',cacheStamp('news-combined'),'Cached multi-source headlines',0,20*60e3);
     state.loaded=state.schedule.length>0||state.drivers.length>0;
     if(state.loaded){state.dataStamp=new Date();render();}
     return state.loaded;
@@ -361,16 +377,18 @@ async function loadNewsSources(force=false){
     state.news=fresh;cachePut('news-combined',fresh);state.newsUpdatedAt=Date.now();
     const newest=Math.max(...fresh.map(n=>new Date(n.pubDate||0).getTime()).filter(Number.isFinite));
     state.newsLatestArticleAt=Number.isFinite(newest)?newest:0;
+    markHealth('news','ok','Publisher + Google News RSS',state.newsUpdatedAt,`${fresh.length} stories · newest ${Q?.ageLabel(state.newsLatestArticleAt)||''}`,0,20*60e3);
   } else {
     const old=cacheGet('news-combined');
-    if(old?.length){state.news=old;const newest=Math.max(...old.map(n=>new Date(n.pubDate||0).getTime()).filter(Number.isFinite));state.newsLatestArticleAt=Number.isFinite(newest)?newest:0;}
+    if(old?.length){state.news=old;const newest=Math.max(...old.map(n=>new Date(n.pubDate||0).getTime()).filter(Number.isFinite));state.newsLatestArticleAt=Number.isFinite(newest)?newest:0;markHealth('news','ok','Cached news',cacheStamp('news-combined'),'Live sources unavailable; showing cached stories',0,20*60e3);}
+    else markHealth('news','error','News sources',Date.now(),'No news source returned stories',0,20*60e3);
   }
   return state.news;
 }
 async function refreshNewsOnly(force=false){
   if(state.newsRefreshing)return;
   state.newsRefreshing=true;
-  try{await loadNewsSources(force);if(state.route==='news')renderNews();}finally{state.newsRefreshing=false;}
+  try{await loadNewsSources(force);}finally{state.newsRefreshing=false;if(state.route==='news')renderNews();}
 }
 
 async function loadBase(force=false){
@@ -391,21 +409,26 @@ async function loadBase(force=false){
       fetchJSON(`${JOLPICA}/${YEAR}/constructorstandings/?limit=100`,'constructors',force?1:15*60e3),
       fetchJSON(`${OPENF1}/drivers?session_key=latest`,'photos',force?1:6*3600e3)
     ]);
-    if(sched.status==='fulfilled')state.schedule=sched.value?.MRData?.RaceTable?.Races||state.schedule;
+    if(sched.status==='fulfilled'){
+      const rows=sched.value?.MRData?.RaceTable?.Races||[];
+      if(rows.length>=10){state.schedule=rows;markHealth('schedule','ok','Jolpica',Date.now(),`${rows.length} rounds`,0,60*60e3);}else if(!state.schedule.length)markHealth('schedule','error','Jolpica',Date.now(),'Calendar response failed validation',0,60*60e3);
+    }else if(!state.schedule.length)markHealth('schedule','error','Jolpica',Date.now(),'Calendar request failed',0,60*60e3);
     if(ds.status==='fulfilled'){
       const table=ds.value?.MRData?.StandingsTable||{};
       const rows=table.StandingsLists?.[0]?.DriverStandings||[];
-      if(rows.length){state.drivers=rows;state.driverStandingsRound=Number(table.round||0);}
+      const v=Q?.validateStandings(rows,{minEntries:18})||{ok:!!rows.length};
+      if(v.ok){state.drivers=rows;state.driverStandingsRound=Number(table.round||0);}
     }
     if(cs.status==='fulfilled'){
       const table=cs.value?.MRData?.StandingsTable||{};
       const rows=table.StandingsLists?.[0]?.ConstructorStandings||[];
-      if(rows.length){state.constructors=rows;state.constructorStandingsRound=Number(table.round||0);}
+      const v=Q?.validateStandings(rows,{minEntries:8})||{ok:!!rows.length};
+      if(v.ok){state.constructors=rows;state.constructorStandingsRound=Number(table.round||0);}
     }
-    if(of1.status==='fulfilled'&&of1.value?.length)state.photos=Object.fromEntries(of1.value.filter(x=>x.name_acronym).map(x=>[x.name_acronym,x]));
+    if(state.drivers.length&&state.constructors.length)markHealth('standings','ok','Jolpica',Date.now(),`Round ${Math.min(state.driverStandingsRound,state.constructorStandingsRound)||'—'}`,Math.min(state.driverStandingsRound,state.constructorStandingsRound),30*60e3);
+    else markHealth('standings','error','Jolpica',Date.now(),'Championship response failed validation',0,30*60e3);
+    if(of1.status==='fulfilled'&&of1.value?.length){state.photos=Object.fromEntries(of1.value.filter(x=>x.name_acronym).map(x=>[x.name_acronym,x]));markHealth('photos','ok','OpenF1',Date.now(),`${of1.value.length} driver records`,0,24*3600e3);}
 
-    // Correct an immediately-available stale cached/current table before the slower network cross-check.
-    const latest=latestCompletedRace();if(latest)applyBundledStandingsSnapshot(Number(latest.round||0));
     state.loaded=state.schedule.length>0||state.drivers.length>0;
     state.dataStamp=new Date();
     render();
@@ -501,24 +524,37 @@ async function deriveStandingsThroughRound(targetRound){
   if(changed){if(dBase<targetRound){state.drivers=resortDriverStandings(drivers);state.driverStandingsRound=targetRound;}if(cBase<targetRound){state.constructors=resortConstructorStandings(constructors);state.constructorStandingsRound=targetRound;}state.standingsDerivedRound=targetRound;}
   return changed;
 }
-function applyBundledStandingsSnapshot(round){
-  if(YEAR!==2026)return false;
-  const snap=BUNDLED_STANDINGS_SNAPSHOTS[Number(round)];if(!snap)return false;
-  let changed=false;
-  if(state.drivers.length){
-    const have=Object.fromEntries(state.drivers.map(x=>[driverCode(x.Driver),Number(x.points||0)]));
-    const leader=Object.entries(snap.drivers).sort((a,b)=>Number(b[1][0])-Number(a[1][0]))[0];
-    const stale=!!leader&&have[leader[0]]!=null&&have[leader[0]]<Number(leader[1][0]);
-    if(stale){state.drivers=resortDriverStandings(state.drivers.map(x=>{const v=snap.drivers[driverCode(x.Driver)];return v?{...x,points:String(v[0]),wins:String(v[1])}:x;}));state.driverStandingsRound=Number(round);changed=true;}
-  }
-  if(state.constructors.length){
-    const have=Object.fromEntries(state.constructors.map(x=>[teamStandingsKey(x.Constructor?.name),Number(x.points||0)]));
-    const leader=Object.entries(snap.constructors).sort((a,b)=>Number(b[1][0])-Number(a[1][0]))[0];
-    const stale=!!leader&&have[leader[0]]!=null&&have[leader[0]]<Number(leader[1][0]);
-    if(stale){state.constructors=resortConstructorStandings(state.constructors.map(x=>{const v=snap.constructors[teamStandingsKey(x.Constructor?.name)];return v?{...x,points:String(v[0]),wins:String(v[1])}:x;}));state.constructorStandingsRound=Number(round);changed=true;}
-  }
-  if(changed)state.standingsDerivedRound=Number(round);
-  return changed;
+async function deriveStandingsFromPreviousRound(targetRound){
+  const round=Number(targetRound||0);if(round<=1)return false;
+  const race=state.schedule.find(r=>Number(r.round)===round);if(!race)return false;
+  try{
+    const [dprev,cprev,pts]=await Promise.all([
+      fetchNoStoreJSON(`${JOLPICA}/${YEAR}/${round-1}/driverstandings/?limit=100&_=${Date.now()}`),
+      fetchNoStoreJSON(`${JOLPICA}/${YEAR}/${round-1}/constructorstandings/?limit=100&_=${Date.now()}`),
+      weekendPoints(race)
+    ]);
+    if(!pts.hadData)return false;
+    const drows=dprev?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings||[];
+    const crows=cprev?.MRData?.StandingsTable?.StandingsLists?.[0]?.ConstructorStandings||[];
+    if(!(Q?.validateStandings(drows,{minEntries:18})?.ok))return false;
+    if(!(Q?.validateStandings(crows,{minEntries:8})?.ok))return false;
+    const expectedD=Q?.provisionalStandings(drows,pts.driverPoints,Object.fromEntries(Object.keys(pts.driverPoints).map(k=>[k,pts.raceWinnerCode===k?1:0])),x=>driverCode(x.Driver))||drows;
+    const expectedC=Q?.provisionalStandings(crows,pts.teamPoints,Object.fromEntries(Object.keys(pts.teamPoints).map(k=>[k,pts.raceWinnerTeam===k?1:0])),x=>teamStandingsKey(x.Constructor?.name))||crows;
+    const currentD=Object.fromEntries(state.drivers.map(x=>[driverCode(x.Driver),Number(x.points||0)]));
+    const currentC=Object.fromEntries(state.constructors.map(x=>[teamStandingsKey(x.Constructor?.name),Number(x.points||0)]));
+    const dMismatch=expectedD.some(x=>currentD[driverCode(x.Driver)]!==Number(x.points||0));
+    const cMismatch=expectedC.some(x=>currentC[teamStandingsKey(x.Constructor?.name)]!==Number(x.points||0));
+    const sum=a=>a.reduce((n,x)=>n+Number(x.points||0),0),prevDTotal=sum(drows),prevCTotal=sum(crows),curDTotal=sum(state.drivers),curCTotal=sum(state.constructors);
+    // Only replace a current-round feed when it still has essentially the previous-round totals.
+    // If totals have changed but differ from our arithmetic (for example a later points penalty), trust the published current table.
+    const dLooksStale=Number(state.driverStandingsRound||0)<round||Math.abs(curDTotal-prevDTotal)<0.01;
+    const cLooksStale=Number(state.constructorStandingsRound||0)<round||Math.abs(curCTotal-prevCTotal)<0.01;
+    const applyD=dMismatch&&dLooksStale,applyC=cMismatch&&cLooksStale;
+    if(applyD){state.drivers=expectedD;state.driverStandingsRound=round;}
+    if(applyC){state.constructors=expectedC;state.constructorStandingsRound=round;}
+    if(applyD||applyC){state.standingsDerivedRound=round;markHealth('standings','ok','Validated previous round + race classification',Date.now(),`Provisional Round ${round} while primary feed catches up`,round,30*60e3);return true;}
+    return false;
+  }catch{return false;}
 }
 
 async function refreshPostRaceStandings(){
@@ -527,24 +563,27 @@ async function refreshPostRaceStandings(){
   const baseDriverRound=Number(state.driverStandingsRound||0);
   if(baseDriverRound>=round&&Number(state.constructorStandingsRound||0)>=round&&!recent){state.standingsDerivedRound=0;state.standingsUpdatedAt=Date.now();return true;}
   const [ds,cs]=await Promise.allSettled([fetchNoStoreJSON(`${JOLPICA}/${YEAR}/${round}/driverstandings/?limit=100&_=${Date.now()}`),fetchNoStoreJSON(`${JOLPICA}/${YEAR}/${round}/constructorstandings/?limit=100&_=${Date.now()}`)]);
-  if(ds.status==='fulfilled'){const table=ds.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.DriverStandings||[],rr=Number(table.round||round);if(rows.length&&rr>=round){state.drivers=rows;state.driverStandingsRound=round;}}
-  if(cs.status==='fulfilled'){const table=cs.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.ConstructorStandings||[],rr=Number(table.round||round);if(rows.length&&rr>=round){state.constructors=rows;state.constructorStandingsRound=round;}}
+  if(ds.status==='fulfilled'){const table=ds.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.DriverStandings||[],rr=Number(table.round||round),v=Q?.validateStandings(rows,{minEntries:18});if(v?.ok&&rr>=round){state.drivers=rows;state.driverStandingsRound=round;}}
+  if(cs.status==='fulfilled'){const table=cs.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.ConstructorStandings||[],rr=Number(table.round||round),v=Q?.validateStandings(rows,{minEntries:8});if(v?.ok&&rr>=round){state.constructors=rows;state.constructorStandingsRound=round;}}
   // In the hours after a race a standings endpoint can report the new round number while still
   // carrying the previous points. Cross-check a separately published current standings table.
   if(recent||Number(state.driverStandingsRound||0)<round)await refreshDriversFromMotorsport(round,baseDriverRound);
   if(Number(state.driverStandingsRound||0)<round||Number(state.constructorStandingsRound||0)<round)await deriveStandingsThroughRound(round);
-  // Last-resort exact snapshot for a just-completed round, so a lagging/blocked upstream feed
-  // cannot leave the app showing yesterday's championship table.
-  applyBundledStandingsSnapshot(round);
+  // Validate the new table against the previous official round plus this weekend's published points.
+  // This catches the common case where an upstream endpoint reports the new round number but still carries pre-race points.
+  await deriveStandingsFromPreviousRound(round);
   if(Number(state.driverStandingsRound||0)>=round&&Number(state.constructorStandingsRound||0)>=round&&state.standingsDerivedRound!==round)state.standingsDerivedRound=0;
-  state.standingsUpdatedAt=Date.now();return true;
+  state.standingsUpdatedAt=Date.now();
+  const source=state.standingsDerivedRound===round?'Validated provisional table':'Jolpica / cross-checked';
+  markHealth('standings','ok',source,state.standingsUpdatedAt,`Round ${round}`,round,30*60e3);
+  return true;
 }
 async function refreshChampionshipOnly(){
   if(state.standingsRefreshing)return;state.standingsRefreshing=true;
   try{
     const [ds,cs]=await Promise.allSettled([fetchNoStoreJSON(`${JOLPICA}/${YEAR}/driverstandings/?limit=100&_=${Date.now()}`),fetchNoStoreJSON(`${JOLPICA}/${YEAR}/constructorstandings/?limit=100&_=${Date.now()}`)]);
-    if(ds.status==='fulfilled'){const table=ds.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.DriverStandings||[];if(rows.length){state.drivers=rows;state.driverStandingsRound=Number(table.round||0);}}
-    if(cs.status==='fulfilled'){const table=cs.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.ConstructorStandings||[];if(rows.length){state.constructors=rows;state.constructorStandingsRound=Number(table.round||0);}}
+    if(ds.status==='fulfilled'){const table=ds.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.DriverStandings||[],v=Q?.validateStandings(rows,{minEntries:18});if(v?.ok){state.drivers=rows;state.driverStandingsRound=Number(table.round||0);}}
+    if(cs.status==='fulfilled'){const table=cs.value?.MRData?.StandingsTable||{},rows=table.StandingsLists?.[0]?.ConstructorStandings||[],v=Q?.validateStandings(rows,{minEntries:8});if(v?.ok){state.constructors=rows;state.constructorStandingsRound=Number(table.round||0);}}
     state.standingsDerivedRound=0;await refreshPostRaceStandings();if(['standings','home','drivers','teams'].includes(state.route))render();
   }finally{state.standingsRefreshing=false;state.standingsUpdatedAt=Date.now();}
 }
@@ -606,7 +645,7 @@ function render(){
   if(r==='home')return renderHome(); if(r==='races')return renderRaces(); if(r==='standings')return renderStandings(); if(r==='news')return renderNews(); if(r==='more')return renderMore();
   if(r.startsWith('race:'))return renderRaceDetail(r.split(':')[1]); if(r.startsWith('session:')){const [,round,key]=r.split(':');return renderSessionResult(round,key);} if(r.startsWith('telemetry:')){const [,round,key]=r.split(':');return renderTelemetry(round,key);} if(r.startsWith('carupdates:'))return renderCarUpdates(r.split(':')[1]); if(r.startsWith('driver:'))return renderDriver(r.slice(7)); if(r.startsWith('circuit:'))return renderCircuit(r.split(':')[1]); if(r.startsWith('radar:'))return renderRadar(r.split(':')[1]); if(r.startsWith('stewarddoc:'))return renderStewardDoc(r.slice(11));
   if(r.startsWith('historyrace:')){const [,y,round]=r.split(':');return renderHistoryRace(y,round);} if(r.startsWith('history:'))return renderHistory(r.split(':')[1]);
-  if(r==='drivers')return renderDrivers(); if(r==='teams')return renderTeams(); if(r==='circuits')return renderCircuits(); if(r==='penalties')return renderPenalties(); if(r==='battles')return renderBattles(); if(r==='stewards')return renderStewards(); if(r==='stats')return renderStats(); if(r==='compare')return renderCompare(); if(r==='history')return renderHistory(); if(r==='records')return renderRecords(); if(r==='updates')return renderUpdates();
+  if(r==='drivers')return renderDrivers(); if(r==='trends')return renderTrends(); if(r==='teams')return renderTeams(); if(r==='circuits')return renderCircuits(); if(r==='penalties')return renderPenalties(); if(r==='battles')return renderBattles(); if(r==='stewards')return renderStewards(); if(r==='stats')return renderStats(); if(r==='compare')return renderCompare(); if(r==='history')return renderHistory(); if(r==='records')return renderRecords(); if(r==='updates')return renderUpdates(); if(r==='preferences')return renderPreferences(); if(r==='datahealth')return renderDataHealth();
   renderHome();
 }
 function titleBlock(eyebrow,title,right=''){ return `<div class="section-head"><div><div class="eyebrow">${esc(eyebrow)}</div><h1>${esc(title)}</h1></div>${right}</div>`; }
@@ -646,6 +685,10 @@ function renderHome(){
       <h1>${esc(r.raceName.toUpperCase())}</h1><div class="circuit">${esc(r.Circuit.circuitName)} · ${esc(r.Circuit.Location.locality)}</div>
       ${ns?`<div class="next-session"><div class="label">NEXT SESSION</div><div class="name">${esc(ns.name)}</div><div class="time">${fmtDateTime(ns.iso)} · UK</div></div>${countdownHtml(ns.iso)}`:`<div class="next-session"><div class="name">Race weekend complete</div></div>`}
     </section>
+    ${freshnessStrip()}
+    <div class="spacer"></div>
+    ${favouriteCard()}
+    <div class="spacer"></div>
     <div class="grid desktop-two"><div>
       ${titleBlock('WEEKEND','Schedule')}<div class="schedule-list">${sessionRows(r)}</div>
       <div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="setRoute('race:${r.round}')">RACE HUB</button><button class="external-btn" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button></div>
@@ -700,7 +743,7 @@ function renderStandings(){
   const sr=spoilerRace(),guard=spoilerActive()&&sr&&raceSessionDone(sr)&&!standingsSpoilersRevealed();
   if(guard){view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Standings',spoilerPill())+`<div class="card spoiler-guard"><div class="eyebrow">SPOILER PROTECTED</div><div class="card-title">Post-race standings are hidden until tomorrow</div><div class="muted">You can reveal them now if you already know the race result.</div><div class="spacer"></div><button class="external-btn red" onclick="revealStandingsSpoilers()">REVEAL STANDINGS</button></div>`;return;}
   const latest=latestCompletedRace(),latestRound=Number(latest?.round||0),behind=latestRound>Math.min(Number(state.driverStandingsRound||0),Number(state.constructorStandingsRound||0));
-  const syncNote=state.standingsDerivedRound===latestRound&&latestRound?`<div class="source-note">LATEST RACE SYNC · Current standings applied while the primary championship feed catches up.</div>`:'';
+  const syncNote=state.standingsDerivedRound===latestRound&&latestRound?`<div class="source-note good-note">✓ VALIDATED POST-RACE TABLE · Rebuilt from the previous official standings plus the published Round ${latestRound} points while the primary feed catches up.</div>`:`<div class="source-note">STANDINGS · ${esc(healthLabel(state.dataHealth.standings))}</div>`;
   view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Standings',spoilerPill())+`<div class="tabs"><button class="tab active" data-stand="drivers">DRIVERS</button><button class="tab" data-stand="constructors">CONSTRUCTORS</button></div><div id="stand-list" class="card">${state.drivers.map(standingRow).join('')}</div>${syncNote}`;
   document.querySelectorAll('[data-stand]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-stand]').forEach(x=>x.classList.remove('active'));b.classList.add('active');const el=document.getElementById('stand-list');el.innerHTML=b.dataset.stand==='drivers'?state.drivers.map(standingRow).join(''):state.constructors.map(c=>`<div class="standing-row"><div class="pos">${esc(c.position)}</div><div class="driver-line"><i class="team-dot" style="background:${teamColour(c.Constructor.name)}"></i><div><div class="driver-name">${esc(c.Constructor.name)}</div><div class="driver-meta">${esc(c.wins)} wins</div></div></div><div class="points">${esc(c.points)}<small>PTS</small></div></div>`).join('');});
   if(behind&&!state.standingsRefreshing&&Date.now()-(state.standingsUpdatedAt||0)>2*60e3)refreshChampionshipOnly();
@@ -721,13 +764,29 @@ function renderNews(){
   document.querySelectorAll('[data-news-source]').forEach(b=>b.onclick=()=>{state.newsSource=b.dataset.newsSource;renderNews();});
 }
 function renderMore(){ const installed=isAppInstalled(); const canInstall=!!state.installPrompt; const install=!installed?(canInstall?`<div class="spacer"></div><div class="card app-mode-card"><div><div class="eyebrow">INSTALL APP</div><div class="card-title" style="margin-top:5px">Install F1 Hub</div><div class="muted" style="margin-top:5px">Adds F1 Hub to Android with its own icon and no browser address bar.</div></div><button id="install-btn" class="external-btn red">↓ INSTALL</button></div>`:`<div class="spacer"></div><div class="card app-mode-card"><div><div class="eyebrow">APP INSTALL</div><div class="card-title" style="margin-top:5px">Install option is preparing</div><div class="muted" style="margin-top:5px">Refresh once if this remains here. If Chrome still does not expose the install prompt, use ⋮ → Install and create shortcut → Install.</div></div></div>`):''; view.innerHTML=titleBlock('F1 HUB','Explore')+`<div class="menu-grid">
+  ${menu('★','My F1','Favourite driver, team & shortcuts','preferences')}${menu('✓','Data Health','Freshness, sources & validation','datahealth')}
   ${menu('👤','Drivers','Profiles, photos & season stats','drivers')}${menu('🏎','Teams','Constructors & points','teams')}${menu('🗺','Circuits','Layouts & track facts','circuits')}${menu('🟨','Penalty Points','Licence points & reprimands','penalties')}
-  ${menu('⚔️','Teammate Battles','Qualifying & race H2H','battles')}${menu('🚨','Stewards','Latest FIA decisions','stewards')}${menu('📊','Season Stats','Wins, podiums & DNFs','stats')}${menu('↔','Driver Compare','Compare two drivers','compare')}
+  ${menu('⚔️','Teammate Battles','Qualifying & race H2H','battles')}${menu('🚨','Stewards','Latest FIA decisions','stewards')}${menu('📊','Season Stats','Wins, podiums & DNFs','stats')}${menu('📈','Championship Trends','Points evolution & team contribution','trends')}${menu('↔','Driver Compare','Compare two drivers','compare')}
   ${menu('🛠️','Car Development','Race-by-race technical updates','updates')}${menu('🕰️','F1 History','Seasons & race results','history')}${menu('🏅','F1 Records','All-time records & milestones','records')}
   </div><div class="spacer"></div>${spoilerSettingsCard()}${install}<div class="source-note">F1 Hub v${APP_VERSION} · Personal unofficial Formula 1 companion. Live/current data comes from free public sources and is cached locally.</div>`;
   document.getElementById('install-btn')?.addEventListener('click',requestInstall);
 }
-function menu(icon,title,sub,route){return `<div class="menu-card" onclick="setRoute('${route}')"><div class="icon">${icon}</div><b>${esc(title)}</b><small>${esc(sub)}</small></div>`;}
+function menu(icon,title,sub,route){return `<button class="menu-card" onclick="setRoute('${route}')" aria-label="${esc(title)}: ${esc(sub)}"><div class="icon">${icon}</div><b>${esc(title)}</b><small>${esc(sub)}</small></button>`;}
+
+function renderPreferences(){
+  const driverOpts=['<option value="">No favourite driver</option>',...state.drivers.map(s=>`<option value="${esc(s.Driver.driverId)}" ${state.favouriteDriver===s.Driver.driverId?'selected':''}>${esc(fullName(s.Driver))} · ${esc(s.Constructors?.at(-1)?.name||'')}</option>`)].join('');
+  const teams=[...new Set(state.constructors.map(c=>c.Constructor?.name).filter(Boolean))];
+  const teamOpts=['<option value="">No favourite team</option>',...teams.map(t=>`<option value="${esc(t)}" ${state.favouriteTeam===t?'selected':''}>${esc(t)}</option>`)].join('');
+  const r=currentRace();
+  view.innerHTML=titleBlock('PERSONALISE','My F1')+`<div class="card preferences-card"><label><div class="eyebrow">FAVOURITE DRIVER</div><select id="fav-driver">${driverOpts}</select></label><label><div class="eyebrow">FAVOURITE TEAM</div><select id="fav-team">${teamOpts}</select></label><div class="spacer"></div><button id="save-favourites" class="external-btn red">SAVE MY F1</button></div>${r?`<div class="spacer"></div><div class="card"><div class="eyebrow">RACE-WEEKEND SHORTCUT</div><div class="card-title">Add ${esc(r.raceName)} to your calendar</div><div class="muted">Creates one .ics file containing every session in the weekend.</div><div class="spacer"></div><button class="external-btn" onclick="addRaceWeekendCalendar('${esc(r.round)}')">ADD WEEKEND TO CALENDAR</button></div>`:''}<div class="spacer"></div>${spoilerSettingsCard()}`;
+  document.getElementById('save-favourites').onclick=()=>{const d=document.getElementById('fav-driver').value,t=document.getElementById('fav-team').value;state.favouriteDriver=d;state.favouriteTeam=t;localStorage.setItem('f1hub:favourite-driver',d);localStorage.setItem('f1hub:favourite-team',t);toast('My F1 saved');renderPreferences();};
+}
+function renderDataHealth(){
+  const rows=['schedule','standings','news','photos'].map(k=>{const r=state.dataHealth[k],st=healthState(r);return `<div class="health-row"><span class="health-dot health-${st}">${healthIcon(r)}</span><div><b>${esc(k.toUpperCase())}</b><small>${esc(healthLabel(r))}</small>${r?.detail?`<em>${esc(r.detail)}</em>`:''}</div><span class="health-state">${esc(st.toUpperCase())}</span></div>`;}).join('');
+  const score=currentDataHealthScore();
+  view.innerHTML=titleBlock('TRUST & FRESHNESS','Data Health')+`<div class="card health-score"><div><div class="eyebrow">CURRENT DATA SCORE</div><div class="stat-big">${score || '—'}<small>/100</small></div></div><div class="health-gauge"><i style="width:${Math.min(100,score)}%"></i></div><div class="muted">Freshness and validation are checked independently. Cached data remains visible offline but is labelled as aging/stale rather than silently presented as current.</div></div><div class="spacer"></div><div class="card health-list">${rows}</div><div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="loadBase(true)">CHECK ALL SOURCES</button></div><div class="source-note">Result classifications are validated for a real P1, unique numeric positions and correct ordering of unclassified cars. Championship tables are validated and post-race points can be reconstructed from the previous official round plus the published race/sprint classification.</div>`;
+}
+window.addRaceWeekendCalendar=addRaceWeekendCalendar;window.shareText=shareText;
 
 function renderDrivers(){ view.innerHTML=titleBlock(`${YEAR} GRID`,'Drivers')+`<div class="driver-grid">${state.drivers.map(s=>driverCard(s)).join('')}</div>`; }
 function driverCard(s){ const team=s.Constructors?.at(-1)?.name||'',imgs=driverPhotoUrls(s),img=imgs[0],fb=imgs[1]||'';return `<div class="card driver-card clickable" onclick="setRoute('driver:${s.Driver.driverId}')"><i class="team-strip" style="background:${teamColour(team)}"></i><div class="driver-photo-holder">${img?`<img class="driver-photo" src="${esc(img)}" data-fallback="${esc(fb)}" data-code="${esc(driverCode(s.Driver))}" onerror="driverPhotoError(this)" alt="${esc(fullName(s.Driver))}" loading="lazy">`:`<div class="avatar">${esc(driverCode(s.Driver))}</div>`}</div><div class="driver-copy"><div class="driver-code">#${esc(s.Driver.permanentNumber||'—')} · ${esc(driverCode(s.Driver))}</div><div class="driver-full">${esc(fullName(s.Driver))}</div><div class="driver-bottom"><span>${esc(team)}</span><span><b>${esc(s.points)}</b> pts</span></div></div></div>`; }
@@ -780,9 +839,19 @@ function radarFrameLabel(frame,i,total){
   const iso=new Date(Number(frame.time)*1000).toISOString(),latest=i===total-1?' · LATEST':'';
   return `${fmtDateTime(iso)}${latest}`;
 }
+let leafletPromise=null;
+function ensureLeaflet(){
+  if(window.L)return Promise.resolve(window.L);if(leafletPromise)return leafletPromise;
+  leafletPromise=new Promise((resolve,reject)=>{
+    if(!document.querySelector('link[data-leaflet]')){const link=document.createElement('link');link.rel='stylesheet';link.href='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css';link.dataset.leaflet='1';document.head.appendChild(link);}
+    const script=document.createElement('script');script.src='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js';script.async=true;script.onload=()=>resolve(window.L);script.onerror=reject;document.head.appendChild(script);
+  });return leafletPromise;
+}
+
 async function initRainRadar(r){
   const mapEl=document.getElementById('radar-map'),status=document.getElementById('radar-status');if(!mapEl||!status)return;
   const l=r.Circuit.Location,lat=Number(l.lat),lon=Number(l.long);
+  try{await ensureLeaflet();}catch{status.textContent='Interactive radar library could not load. Use Open Windy below.';return;}
   if(!window.L){status.textContent='Interactive radar library could not load. Use Open Windy below.';return;}
   try{
     const map=L.map(mapEl,{zoomControl:true,attributionControl:true,minZoom:5,maxZoom:16}).setView([lat,lon],11);
@@ -823,23 +892,41 @@ async function renderRadar(round){
   await initRainRadar(r);
 }
 
-function renderRaceDetail(round){ const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('races');const c=CIRCUITS[r.Circuit.circuitId]||{},src=circuitSvg(r.Circuit.circuitId);view.innerHTML=`<div class="actions"><button class="external-btn" onclick="setRoute('races')">← CALENDAR</button></div><div class="spacer"></div><section class="hero" style="min-height:190px"><div class="hero-top"><span class="pill ${raceStatus(r)==='NEXT'?'live':'subtle'}">ROUND ${esc(r.round)}</span><span>${flag(r.Circuit.Location.country)}</span></div><h1>${esc(r.raceName.toUpperCase())}</h1><div class="circuit">${esc(r.Circuit.circuitName)}</div></section><div class="tabs"><button class="tab active" data-racetab="weekend">WEEKEND</button><button class="tab" data-racetab="results">RESULTS</button><button class="tab" data-racetab="control">RACE CONTROL</button><button class="tab" data-racetab="radio">RADIO</button></div><div id="race-tab-content"></div>`;
+function renderRaceDetail(round){ const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('races');const c=CIRCUITS[r.Circuit.circuitId]||{},src=circuitSvg(r.Circuit.circuitId);view.innerHTML=`<div class="actions"><button class="external-btn" onclick="setRoute('races')">← CALENDAR</button><button class="external-btn" onclick="addRaceWeekendCalendar('${r.round}')">＋ CALENDAR</button></div><div class="spacer"></div><section class="hero" style="min-height:190px"><div class="hero-top"><span class="pill ${raceStatus(r)==='NEXT'?'live':'subtle'}">ROUND ${esc(r.round)}</span><span>${flag(r.Circuit.Location.country)}</span></div><h1>${esc(r.raceName.toUpperCase())}</h1><div class="circuit">${esc(r.Circuit.circuitName)}</div></section><div class="tabs"><button class="tab active" data-racetab="weekend">WEEKEND</button><button class="tab" data-racetab="results">RESULTS</button><button class="tab" data-racetab="control">RACE CONTROL</button><button class="tab" data-racetab="radio">RADIO</button></div><div id="race-tab-content"></div>`;
   const root=document.getElementById('race-tab-content'); const drawWeekend=()=>{root.innerHTML=`<div class="grid desktop-two"><div><div class="schedule-list">${sessionRows(r)}</div><div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button><button class="external-btn" onclick="setRoute('circuit:${r.round}')">TRACK INFO</button></div></div><div>${weatherCard(r)}${src?`<div class="spacer"></div><div class="card"><div class="track-img-wrap"><img class="track-img" src="${src}" alt="track layout"></div><div class="facts"><div class="fact"><b>${c.length||'—'} km</b><small>LENGTH</small></div><div class="fact"><b>${c.laps||'—'}</b><small>LAPS</small></div><div class="fact"><b>${c.turns||'—'}</b><small>TURNS</small></div></div></div>`:''}</div></div>`;loadWeatherIntoCard(r);}; drawWeekend();
   document.querySelectorAll('[data-racetab]').forEach(b=>b.onclick=async()=>{document.querySelectorAll('[data-racetab]').forEach(x=>x.classList.remove('active'));b.classList.add('active');const t=b.dataset.racetab;if(t==='weekend')drawWeekend();else if(t==='results')await drawResults(root,r);else if(t==='control')await drawRaceControl(root,r);else await drawRadio(root,r);});
 }
 async function drawResults(root,r){
   root.innerHTML='<div class="loader">Loading classification…</div>';
   try{
-    const [res,q]=await Promise.allSettled([fetchJSON(`${JOLPICA}/${YEAR}/${r.round}/results/?limit=100`,`result-${r.round}`,15*60e3),fetchJSON(`${JOLPICA}/${YEAR}/${r.round}/qualifying/?limit=100`,`quali-${r.round}`,15*60e3)]);
+    const [res,q,pits]=await Promise.allSettled([
+      fetchJSON(`${JOLPICA}/${YEAR}/${r.round}/results/?limit=100`,`result-${r.round}`,15*60e3),
+      fetchJSON(`${JOLPICA}/${YEAR}/${r.round}/qualifying/?limit=100`,`quali-${r.round}`,15*60e3),
+      fetchJSON(`${JOLPICA}/${YEAR}/${r.round}/pitstops/?limit=2000`,`pitstops-${r.round}`,30*60e3)
+    ]);
     const rr=res.status==='fulfilled'?res.value?.MRData?.RaceTable?.Races?.[0]:null,qq=q.status==='fulfilled'?q.value?.MRData?.RaceTable?.Races?.[0]:null;
-    root.innerHTML=`${resultTable('RACE RESULT',rr?.Results||[])}${rr?.Results?.length?`<div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="setRoute('telemetry:${r.round}:race')">VIEW RACE TELEMETRY ›</button></div>`:''}<div id="race-strategy-inline"></div><div class="spacer"></div>${resultTable('QUALIFYING',qq?.QualifyingResults||[],true)}`;
+    const pitRows=pits.status==='fulfilled'?(pits.value?.MRData?.RaceTable?.Races?.[0]?.PitStops||[]):[];
+    const validation=Q?.validateResults(rr?.Results||[],{minEntries:15});
+    if(rr?.Results?.length&&validation&&!validation.ok)markHealth('results','error','Jolpica',Date.now(),`Classification validation: ${validation.issues.join(', ')}`,Number(r.round),24*3600e3);
+    else if(rr?.Results?.length)markHealth('results','ok','Jolpica',Date.now(),`Round ${r.round} classification validated`,Number(r.round),24*3600e3);
+    root.innerHTML=`${raceAtGlanceHtml(rr,r,pitRows)}${rr?.Results?.length?'<div class="spacer"></div>':''}${resultTable('RACE RESULT',rr?.Results||[])}${rr?.Results?.length?`<div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="setRoute('telemetry:${r.round}:race')">VIEW RACE TELEMETRY ›</button></div>`:''}<div id="race-strategy-inline"></div><div class="spacer"></div>${resultTable('QUALIFYING',qq?.QualifyingResults||[],true)}`;
     const slot=document.getElementById('race-strategy-inline');
     if(slot&&rr?.Results?.length){
-      try{const os=await openF1RaceSession(r);if(os){const [ofres,drivers,stints]=await Promise.all([fetchJSON(`${OPENF1}/session_result?session_key=${os.session_key}`,`of1-result-${os.session_key}`,15*60e3),fetchJSON(`${OPENF1}/drivers?session_key=${os.session_key}`,`of1-drivers-${os.session_key}`,6*3600e3),fetchJSON(`${OPENF1}/stints?session_key=${os.session_key}`,`of1-stints-${os.session_key}`,30*60e3)]);slot.innerHTML=`<div class="spacer"></div>${sessionRecapHtml(ofres,drivers,{key:'race'})}<div class="spacer"></div>${raceStrategyHtml(stints,drivers,ofres)}`;}}
+      try{const os=await openF1RaceSession(r);if(os){const [ofres,drivers,stints]=await Promise.all([fetchJSON(`${OPENF1}/session_result?session_key=${os.session_key}`,`of1-result-${os.session_key}`,15*60e3),fetchJSON(`${OPENF1}/drivers?session_key=${os.session_key}`,`of1-drivers-${os.session_key}`,6*3600e3),fetchJSON(`${OPENF1}/stints?session_key=${os.session_key}`,`of1-stints-${os.session_key}`,30*60e3)]);slot.innerHTML=`<div class="spacer"></div>${raceStrategyHtml(stints,drivers,ofres)}`;}}
       catch{}
     }
   }catch{root.innerHTML='<div class="error-box">Results are not available yet.</div>';}
 }
+function raceAtGlanceHtml(rr,r,pitRows=[]){
+  const rows=rr?.Results||[];if(!rows.length)return '';
+  const i=Q?.calculateRaceInsights(rows);if(!i?.winner)return '';
+  const driver=x=>x?`${driverCode(x.Driver)} · ${x.Driver?.familyName||''}`:'—';
+  const gain=i.biggestGainer,loss=i.biggestLoser,fast=i.fastest;
+  const leader=state.drivers[0],second=state.drivers[1],champGap=leader&&second?Number(leader.points)-Number(second.points):null;
+  const podium=i.podium.map((x,n)=>`<div class="recap-line"><strong>P${n+1}</strong><span>${esc(driver(x))}</span><b>${n===0?'WINNER':esc(raceGapLabel(x,i.winner))}</b></div>`).join('');
+  return `<div class="card race-glance"><div class="eyebrow">RACE AT A GLANCE</div><div class="recap-hero"><div><div class="recap-sub">WINNER</div><div class="recap-main">${esc(driver(i.winner))}</div><div class="recap-sub">${esc(i.winner.Time?.time||'CLASSIFIED P1')}</div></div><div><div class="recap-sub">CHAMPIONSHIP</div><div class="recap-gap">${leader?`${esc(driverCode(leader.Driver))} · ${esc(leader.points)} pts`:'—'}</div><div class="recap-sub">${champGap!=null?`${champGap} pts to P2`:'Standings updating'}</div></div></div><div class="recap-top3">${podium}</div><div class="glance-grid"><div><small>FASTEST LAP</small><b>${fast?esc(driver(fast)):'—'}</b><span>${esc(fast?.FastestLap?.Time?.time||'—')}</span></div><div><small>BIGGEST GAIN</small><b>${gain?esc(driver(gain.row)):'—'}</b><span>${gain&&gain.gain>0?`+${gain.gain} places`:'—'}</span></div><div><small>BIGGEST LOSS</small><b>${loss?esc(driver(loss.row)):'—'}</b><span>${loss&&loss.gain<0?`${loss.gain} places`:'—'}</span></div><div><small>RETIREMENTS</small><b>${i.dnfs.length}</b><span>DNF / DNS / DSQ</span></div><div><small>PIT STOPS</small><b>${pitRows.length||'—'}</b><span>recorded stops</span></div><div><small>DATA</small><b>VALIDATED</b><span>${esc(healthLabel(state.dataHealth.results))}</span></div></div><div class="spacer"></div><div class="actions"><button class="external-btn" onclick="shareText('${esc(r.raceName)} result','${esc(driver(i.winner))} won the ${esc(r.raceName)}. ${leader?`Championship leader: ${esc(driverCode(leader.Driver))} ${esc(leader.points)} pts.`:''}')">SHARE RESULT</button></div></div>`;
+}
+
 function raceGapLabel(x,winner){
   if(Number(x.position)===1)return x.Time?.time||'WINNER';
   const raw=x.Time?.time;
@@ -857,8 +944,9 @@ function raceGapLabel(x,winner){
 function qualiTime(x){return x.Q3||x.Q2||x.Q1||'—';}
 function resultTable(title,rows,q=false){
   if(!rows.length)return `<div class="card"><div class="eyebrow">${title}</div><div class="empty">Not available yet.</div></div>`;
-  const winner=rows.find(x=>Number(x.position)===1)||rows[0];
-  return `<div class="card classification-card"><div class="eyebrow">${title}</div><div class="classification-head"><span>POS</span><span>DRIVER</span><span>${q?'TIME':'TIME / GAP'}</span></div><div class="classification-list">${rows.map(x=>{
+  const ordered=q?rows.slice().sort((a,b)=>Number(a.position)-Number(b.position)):(Q?.sortResults(rows)||rows);
+  const winner=ordered.find(x=>Number(x.position)===1)||ordered[0];
+  return `<div class="card classification-card"><div class="eyebrow">${title}</div><div class="classification-head"><span>POS</span><span>DRIVER</span><span>${q?'TIME':'TIME / GAP'}</span></div><div class="classification-list">${ordered.map(x=>{
     const timing=q?qualiTime(x):raceGapLabel(x,winner);
     const meta=q?`${x.Constructor?.name||''}`:`${x.Constructor?.name||''}${x.points?` · ${x.points} pt${Number(x.points)===1?'':'s'}`:''}`;
     return `<div class="classification-row ${Number(x.position)===1&&!q?'winner':''}"><div class="class-pos">${esc(x.position)}</div><div class="driver-line"><i class="team-dot" style="background:${teamColour(x.Constructor?.name)}"></i><div><div class="driver-name">${esc(driverCode(x.Driver))} · ${esc(x.Driver.familyName)}</div><div class="driver-meta">${esc(meta)}</div></div></div><div class="class-time">${esc(timing)}</div></div>`;
@@ -900,14 +988,7 @@ function openF1Gap(row,s){
   const gap=lastValue(row.gap_to_leader);if(typeof gap==='string')return gap.toUpperCase();const g=Number(gap);return Number.isFinite(g)?`+${g.toFixed(3)}`:'';
 }
 function validSessionPosition(row){const p=Number(row?.position);return Number.isFinite(p)&&p>0?p:null;}
-function sortedSessionResults(rows){
-  return (rows||[]).slice().sort((a,b)=>{
-    const pa=validSessionPosition(a),pb=validSessionPosition(b);
-    if(pa!==null||pb!==null){if(pa===null)return 1;if(pb===null)return -1;if(pa!==pb)return pa-pb;}
-    const la=Number(a?.number_of_laps??-1),lb=Number(b?.number_of_laps??-1);if(la!==lb)return lb-la;
-    const rank=x=>x?.dsq?3:x?.dns?2:x?.dnf?1:0;return rank(a)-rank(b);
-  });
-}
+function sortedSessionResults(rows){return Q?.sortResults(rows)||(rows||[]).slice();}
 function sessionResultTable(rows,drivers,s){
   if(!rows?.length)return '<div class="card"><div class="empty">Classification not available yet.</div></div>';
   const dmap=openF1DriverMap(drivers);
@@ -1487,7 +1568,7 @@ async function renderTelemetry(round,key){
         const got=await fetchTelemetryComparisonSmart(r,s,os,[{driver:na,lap:lpa},{driver:nb,lap:lpb}],progress),[A,B]=got.series;
         if(!A.length||!B.length){const e=new Error('telemetry-empty');e.code='telemetry-empty';throw e;}
         const nameA=(dmap[String(na)]?.name_acronym||na),nameB=(dmap[String(nb)]?.name_acronym||nb),names=[nameA,nameB],rpmMax=Math.max(10000,...A.map(x=>x.rpm),...B.map(x=>x.rpm));
-        output.innerHTML=`<div class="spacer"></div><div class="grid two">${telemetrySummary(A,lpa,nameA)}${telemetrySummary(B,lpb,nameB)}</div><div class="spacer"></div>${sectorComparison(lpa,lpb,names)}<div class="spacer"></div>${titleBlock('TIME GAIN MAP','Who is faster where')}<div class="card speed-map-card delta-map-card">${trackDeltaMapSvg(A,B,names,lpa,lpb)}</div><div class="spacer"></div>${telemetryLineChart('SPEED',A,B,x=>x.speed,'km/h',0,Math.max(360,...A.map(x=>x.speed),...B.map(x=>x.speed)),names)}<div class="spacer"></div>${deltaChart(A,B,names,lpa,lpb)}<div class="spacer"></div>${telemetryLineChart('THROTTLE',A,B,x=>x.throttle,'%',0,100,names)}<div class="spacer"></div>${telemetryLineChart('BRAKE',A,B,x=>x.brake,'0 / 100',0,100,names)}<div class="spacer"></div>${telemetryLineChart('GEAR',A,B,x=>x.gear,'gear',0,8,names)}<div class="spacer"></div>${telemetryLineChart('RPM',A,B,x=>x.rpm,'rpm',0,rpmMax,names)}`;
+        output.innerHTML=`<div class="spacer"></div><div class="grid two">${telemetrySummary(A,lpa,nameA)}${telemetrySummary(B,lpb,nameB)}</div><div class="spacer"></div>${sectorComparison(lpa,lpb,names)}<div class="spacer"></div>${titleBlock('TIME GAIN MAP','Who is faster where')}<div class="card speed-map-card delta-map-card">${trackDeltaMapSvg(A,B,names,lpa,lpb)}</div><div class="spacer"></div>${telemetryLineChart('SPEED',A,B,x=>x.speed,'km/h',0,Math.max(360,...A.map(x=>x.speed),...B.map(x=>x.speed)),names)}<div class="spacer"></div>${deltaChart(A,B,names,lpa,lpb)}<div class="spacer"></div>${telemetryLineChart('THROTTLE',A,B,x=>x.throttle,'%',0,100,names)}<div class="spacer"></div>${telemetryLineChart('BRAKE',A,B,x=>x.brake,'0 / 100',0,100,names)}<div class="spacer"></div>${telemetryLineChart('GEAR',A,B,x=>x.gear,'gear',0,8,names)}<div class="spacer"></div>${telemetryLineChart('RPM',A,B,x=>x.rpm,'rpm',0,rpmMax,names)}<div class="spacer"></div><div class="actions"><button class="external-btn" onclick="shareText('F1 Hub telemetry','${nameA} ${formatLapSeconds(lpa.lap_duration)} vs ${nameB} ${formatLapSeconds(lpb.lap_duration)} · ${esc(r.raceName)} ${esc(s.name)}')">SHARE COMPARISON</button></div>`;
       }catch(e){
         let msg='Telemetry could not be loaded for one of these laps. Try another completed lap or try again shortly.';
         const st=Number(e?.status||e?.message);
@@ -1616,7 +1697,42 @@ function renderRecords(){
 
 async function renderStats(){view.innerHTML=titleBlock(`${YEAR} SEASON`,'Season Stats')+'<div class="loader">Calculating season stats…</div>';try{const [races,quali]=await getSeasonData();const stats=state.drivers.map(s=>{let pod=0,dnfs=0,poles=0;for(const r of races){const x=(r.Results||[]).find(z=>z.Driver.driverId===s.Driver.driverId);if(x){if(Number(x.position)<=3)pod++;if(dnf(x))dnfs++;}}for(const q of quali){const x=(q.QualifyingResults||[]).find(z=>z.Driver.driverId===s.Driver.driverId);if(Number(x?.position)===1)poles++;}return {s,pod,dnfs,poles};});const leaders=(key,label)=>`<div class="card"><div class="eyebrow">${label}</div>${[...stats].sort((a,b)=>Number(b[key]??b.s[key])-Number(a[key]??a.s[key])).slice(0,5).map((x,i)=>`<div class="standing-row"><div class="pos">${i+1}</div><div class="driver-name">${esc(driverCode(x.s.Driver))} · ${esc(x.s.Driver.familyName)}</div><div class="points">${esc(x[key]??x.s[key])}</div></div>`).join('')}</div>`;view.innerHTML=titleBlock(`${YEAR} SEASON`,'Season Stats')+`<div class="grid two">${leaders('wins','MOST WINS')}${leaders('pod','MOST PODIUMS')}${leaders('poles','MOST POLES')}${leaders('dnfs','MOST DNFs')}</div>`;}catch{view.innerHTML+='<div class="error-box">Season history is unavailable.</div>';}}
 
-function renderCompare(){const opts=state.drivers.map(s=>`<option value="${esc(s.Driver.driverId)}">${esc(fullName(s.Driver))}</option>`).join('');view.innerHTML=titleBlock(`${YEAR} SEASON`,'Driver Compare')+`<div class="card"><div class="grid two"><label><div class="eyebrow">DRIVER A</div><select id="cmp-a" style="width:100%;margin-top:8px;background:#0d0d0d;color:white;border:1px solid #333;border-radius:12px;padding:12px">${opts}</select></label><label><div class="eyebrow">DRIVER B</div><select id="cmp-b" style="width:100%;margin-top:8px;background:#0d0d0d;color:white;border:1px solid #333;border-radius:12px;padding:12px">${opts}</select></label></div><div class="spacer"></div><button id="cmp-go" class="external-btn red">COMPARE</button></div><div id="cmp-out" class="spacer"></div>`;const a=document.getElementById('cmp-a'),b=document.getElementById('cmp-b');b.selectedIndex=Math.min(1,b.options.length-1);document.getElementById('cmp-go').onclick=async()=>{const out=document.getElementById('cmp-out');out.innerHTML='<div class="loader">Comparing…</div>';try{const [races,quali]=await getSeasonData();const byId=Object.fromEntries(state.drivers.map(s=>[s.Driver.driverId,s]));const aa=simpleDriverStats(a.value,races,quali,byId),bb=simpleDriverStats(b.value,races,quali,byId);out.innerHTML=`<div class="card battle-card"><div class="battle-head"><div class="battle-driver">${aa.code}</div><div class="battle-vs">VS</div><div class="battle-driver">${bb.code}</div></div>${[['POINTS','points'],['WINS','wins'],['PODIUMS','pod'],['POLES','poles'],['DNFs','dnfs'],['AVG FINISH','avgF']].map(([l,k])=>`<div class="battle-stat"><b>${aa[k]}</b><div class="mid">${l}</div><b>${bb[k]}</b></div>`).join('')}</div>`;}catch{out.innerHTML='<div class="error-box">Could not load season history.</div>';}};}
+async function fetchSeasonSprints(){
+  const out=[];
+  for(const r of state.schedule.filter(x=>x.Sprint&&raceSessionDone(x))){
+    try{const j=await fetchJSON(`${JOLPICA}/${YEAR}/${r.round}/sprint/?limit=100`,`sprint-season-${r.round}`,60*60e3),rr=j?.MRData?.RaceTable?.Races?.[0];if(rr?.SprintResults?.length)out.push({...rr,Results:rr.SprintResults});}catch{}
+  }
+  return out;
+}
+function pointsEvolution(ids,races,sprints=[]){
+  const rounds=[...new Set([...races,...sprints].map(r=>Number(r.round)).filter(Number.isFinite))].sort((a,b)=>a-b),totals=Object.fromEntries(ids.map(id=>[id,0])),series=Object.fromEntries(ids.map(id=>[id,[]]));
+  for(const round of rounds){for(const r of [...races,...sprints].filter(x=>Number(x.round)===round)){for(const id of ids){const x=(r.Results||[]).find(z=>z.Driver?.driverId===id);totals[id]+=Number(x?.points||0);}}for(const id of ids)series[id].push({round,points:totals[id]});}
+  return {rounds,series};
+}
+function evolutionChart(seriesMap,labels,colours){
+  const entries=Object.entries(seriesMap).filter(([,v])=>v?.length);if(!entries.length)return '';
+  const W=760,H=300,p=38,maxR=Math.max(...entries.flatMap(([,v])=>v.map(x=>x.round))),maxP=Math.max(1,...entries.flatMap(([,v])=>v.map(x=>x.points))),x=r=>p+(r-1)/Math.max(1,maxR-1)*(W-p*2),y=v=>H-p-v/maxP*(H-p*2);
+  const grid=[0,.25,.5,.75,1].map(t=>{const yy=p+(H-p*2)*t,val=Math.round(maxP*(1-t));return `<line x1="${p}" y1="${yy}" x2="${W-p}" y2="${yy}"/><text x="4" y="${yy+4}">${val}</text>`;}).join('');
+  const paths=entries.map(([id,v],i)=>`<path d="${v.map((pt,j)=>`${j?'L':'M'}${x(pt.round).toFixed(1)},${y(pt.points).toFixed(1)}`).join(' ')}" style="--line:${colours[id]||['#ff3535','#eee','#00d2be','#ff8700','#3671c6'][i%5]}"/>`).join('');
+  const legend=entries.map(([id],i)=>`<span><i style="--line:${colours[id]||['#ff3535','#eee','#00d2be','#ff8700','#3671c6'][i%5]}"></i>${esc(labels[id]||id)}</span>`).join('');
+  return `<div class="card evolution-card"><div class="eyebrow">POINTS EVOLUTION</div><div class="evolution-legend">${legend}</div><svg class="evolution-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Championship points by round"><g class="evolution-grid">${grid}</g>${paths}</svg><div class="distance-axis"><span>R1</span><span>ROUND</span><span>R${maxR}</span></div></div>`;
+}
+function pairHeadToHead(a,b,races,quali){let raceA=0,raceB=0,qA=0,qB=0;for(const r of races){const x=(r.Results||[]).find(z=>z.Driver.driverId===a),y=(r.Results||[]).find(z=>z.Driver.driverId===b);if(x&&y){if(Number(x.position)<Number(y.position))raceA++;else if(Number(y.position)<Number(x.position))raceB++;}}for(const r of quali){const x=(r.QualifyingResults||[]).find(z=>z.Driver.driverId===a),y=(r.QualifyingResults||[]).find(z=>z.Driver.driverId===b);if(x&&y){if(Number(x.position)<Number(y.position))qA++;else if(Number(y.position)<Number(x.position))qB++;}}return {raceA,raceB,qA,qB};}
+async function renderTrends(){
+  view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Trends')+'<div class="loader">Building championship trends…</div>';
+  try{
+    const [races,,sprints]=await Promise.all([getSeasonData(),Promise.resolve(null),fetchSeasonSprints()]).then(([season,_,sp])=>[season[0],season[1],sp]);
+    const top=state.drivers.slice(0,5),ids=top.map(x=>x.Driver.driverId),evo=pointsEvolution(ids,races,sprints),labels=Object.fromEntries(top.map(x=>[x.Driver.driverId,driverCode(x.Driver)])),colours=Object.fromEntries(top.map(x=>[x.Driver.driverId,teamColour(x.Constructors?.at(-1)?.name||'')]));
+    const contributions=state.constructors.map(c=>{const team=c.Constructor.name,total=Number(c.points||0),members=state.drivers.filter(d=>(d.Constructors?.at(-1)?.name||'')===team).map(d=>({code:driverCode(d.Driver),pts:Number(d.points||0)}));return {team,total,members};});
+    view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Trends')+evolutionChart(evo.series,labels,colours)+`<div class="spacer"></div>${titleBlock('CONSTRUCTORS','Driver Contribution')}<div class="grid two">${contributions.map(c=>`<div class="card contribution-card" style="border-top:4px solid ${teamColour(c.team)}"><div class="eyebrow">${esc(c.team)}</div><div class="stat-big">${c.total}<small> pts</small></div><div class="contribution-bar" style="color:${teamColour(c.team)}">${c.members.map((m,i)=>`<i style="width:${c.total?Math.max(2,m.pts/c.total*100):0}%;opacity:${i?0.55:1}"></i>`).join('')}</div>${c.members.map(m=>`<div class="history-leader"><b>${esc(m.code)}</b><span>${m.pts} pts · ${c.total?Math.round(m.pts/c.total*100):0}%</span></div>`).join('')}</div>`).join('')}</div><div class="source-note">Points evolution uses published race and sprint classifications. Constructor contribution compares the current points held by each team's listed drivers with the constructor total.</div>`;
+  }catch{view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Trends')+'<div class="error-box">Championship trends could not be calculated right now.</div>';}
+}
+function renderCompare(){
+  const opts=state.drivers.map(s=>`<option value="${esc(s.Driver.driverId)}">${esc(fullName(s.Driver))}</option>`).join('');
+  view.innerHTML=titleBlock(`${YEAR} SEASON`,'Driver Compare')+`<div class="card"><div class="grid two"><label><div class="eyebrow">DRIVER A</div><select id="cmp-a">${opts}</select></label><label><div class="eyebrow">DRIVER B</div><select id="cmp-b">${opts}</select></label></div><div class="spacer"></div><button id="cmp-go" class="external-btn red">COMPARE</button></div><div id="cmp-out" class="spacer"></div>`;
+  const a=document.getElementById('cmp-a'),b=document.getElementById('cmp-b');b.selectedIndex=Math.min(1,b.options.length-1);
+  document.getElementById('cmp-go').onclick=async()=>{const out=document.getElementById('cmp-out');if(a.value===b.value){out.innerHTML='<div class="error-box">Choose two different drivers.</div>';return;}out.innerHTML='<div class="loader">Comparing…</div>';try{const [[races,quali],sprints]=await Promise.all([getSeasonData(),fetchSeasonSprints()]);const byId=Object.fromEntries(state.drivers.map(s=>[s.Driver.driverId,s])),aa=simpleDriverStats(a.value,races,quali,byId),bb=simpleDriverStats(b.value,races,quali,byId),h=pairHeadToHead(a.value,b.value,races,quali),evo=pointsEvolution([a.value,b.value],races,sprints),labels={[a.value]:aa.code,[b.value]:bb.code},colours={[a.value]:teamColour(byId[a.value]?.Constructors?.at(-1)?.name||''),[b.value]:teamColour(byId[b.value]?.Constructors?.at(-1)?.name||'')};out.innerHTML=`<div class="card battle-card"><div class="battle-head"><div class="battle-driver">${aa.code}</div><div class="battle-vs">VS</div><div class="battle-driver">${bb.code}</div></div>${[['POINTS','points'],['WINS','wins'],['PODIUMS','pod'],['POLES','poles'],['DNFs','dnfs'],['AVG FINISH','avgF']].map(([l,k])=>`<div class="battle-stat"><b>${aa[k]}</b><div class="mid">${l}</div><b>${bb[k]}</b></div>`).join('')}<div class="battle-stat"><b>${h.qA}</b><div class="mid">QUALI H2H</div><b>${h.qB}</b></div><div class="battle-stat"><b>${h.raceA}</b><div class="mid">RACE H2H</div><b>${h.raceB}</b></div></div><div class="spacer"></div>${evolutionChart(evo.series,labels,colours)}<div class="spacer"></div><div class="actions"><button class="external-btn" onclick="shareText('F1 Hub driver comparison','${aa.code} vs ${bb.code}: ${aa.points}-${bb.points} pts, qualifying H2H ${h.qA}-${h.qB}, race H2H ${h.raceA}-${h.raceB}.')">SHARE COMPARISON</button></div>`;}catch{out.innerHTML='<div class="error-box">Could not load season history.</div>';}};
+}
 function simpleDriverStats(id,races,quali,byId){let pod=0,dnfs=0,poles=0,fin=[];for(const r of races){const x=(r.Results||[]).find(z=>z.Driver.driverId===id);if(x){if(Number(x.position)<=3)pod++;if(dnf(x))dnfs++;if(Number(x.position))fin.push(Number(x.position));}}for(const q of quali){const x=(q.QualifyingResults||[]).find(z=>z.Driver.driverId===id);if(Number(x?.position)===1)poles++;}const s=byId[id];return {code:driverCode(s.Driver),points:s.points,wins:s.wins,pod,poles,dnfs,avgF:fin.length?(fin.reduce((a,b)=>a+b)/fin.length).toFixed(1):'—'};}
 
 function setupPullToRefresh(){
@@ -1658,6 +1774,19 @@ function setupPullToRefresh(){
   },{passive:true});
   window.addEventListener('touchcancel',reset,{passive:true});
 }
+
+function enhanceAccessibility(){
+  view.querySelectorAll('.clickable[onclick],.steward-link[onclick]').forEach(el=>{if(el.tagName==='BUTTON'||el.tagName==='A')return;if(!el.hasAttribute('role'))el.setAttribute('role','button');if(!el.hasAttribute('tabindex'))el.tabIndex=0;if(!el.dataset.keyReady){el.dataset.keyReady='1';el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();el.click();}});}});
+}
+new MutationObserver(enhanceAccessibility).observe(view,{childList:true,subtree:true});
+async function checkForUpdate(){
+  if(location.protocol==='file:')return;
+  try{const r=await fetch(`./version.json?_=${Date.now()}`,{cache:'no-store'});if(!r.ok)return;const v=(await r.json())?.version;if(v&&v!==APP_VERSION){state.updateAvailable=true;document.getElementById('update-banner')?.classList.remove('hidden');}}catch{}
+}
+async function applyAppUpdate(){
+  try{if('caches' in window){for(const k of await caches.keys())if(k.startsWith('f1-hub-'))await caches.delete(k);}const reg=await navigator.serviceWorker?.getRegistration?.();await reg?.update?.();}catch{}location.reload();
+}
+window.applyAppUpdate=applyAppUpdate;
 
 // Navigation / lifecycle
 window.setRoute=setRoute;
@@ -1705,6 +1834,8 @@ function installPromptReady(e){
 }
 document.querySelectorAll('.nav-btn').forEach(b=>b.addEventListener('click',()=>setRoute(b.dataset.route)));
 document.getElementById('brand-btn').addEventListener('click',()=>setRoute('home'));
+document.getElementById('connection-pill')?.addEventListener('click',()=>setRoute('datahealth'));
+document.getElementById('update-now')?.addEventListener('click',applyAppUpdate);
 document.getElementById('install-app-btn')?.addEventListener('click',requestInstall);
 window.addEventListener('popstate',()=>{state.route=decodeURIComponent(location.hash.slice(1)||'home');document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',parentNav(state.route)===b.dataset.route));render();});
 document.getElementById('refresh-btn').addEventListener('click',async()=>{if(state.refreshing)return;toast('Refreshing…');await loadBase(true);toast('Updated');});
@@ -1717,7 +1848,7 @@ function hideInstallSheet(){document.getElementById('install-sheet')?.classList.
 document.getElementById('install-now')?.addEventListener('click',requestInstall);
 document.getElementById('install-later')?.addEventListener('click',()=>{sessionStorage.setItem('f1hub-install-dismissed','1');hideInstallSheet();});
 installPromptReady();
-if('serviceWorker' in navigator && location.protocol!=='file:')navigator.serviceWorker.register('./service-worker.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});
+if('serviceWorker' in navigator && location.protocol!=='file:')navigator.serviceWorker.register('./service-worker.js',{updateViaCache:'none'}).then(r=>{r.update();checkForUpdate();}).catch(()=>{});
 if(!navigator.onLine){document.getElementById('connection-pill').textContent='OFFLINE';document.getElementById('connection-pill').className='pill warn';}
 updateInstallUI();
 setupPullToRefresh();
@@ -1731,6 +1862,7 @@ document.addEventListener('visibilitychange',()=>{
 });
 window.addEventListener('pageshow',()=>{if(state.loaded&&Date.now()-(state.newsUpdatedAt||0)>3*60e3)refreshNewsOnly(true);if(state.loaded&&latestCompletedRace()&&Date.now()-(state.standingsUpdatedAt||0)>5*60e3)refreshChampionshipOnly();});
 setInterval(()=>{if(!document.hidden&&state.loaded&&Date.now()-(state.newsUpdatedAt||0)>10*60e3)refreshNewsOnly(true);},60e3);
+setInterval(()=>{if(!document.hidden)checkForUpdate();},15*60e3);
 // Paint cached content immediately, then refresh it without blocking startup.
 hydrateBaseFromCache();
 loadBase();

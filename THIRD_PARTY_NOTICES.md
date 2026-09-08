@@ -12,6 +12,7 @@ F1 Hub is an unofficial personal project and is not affiliated with Formula 1, t
 - RaceFans RSS — Formula 1 news headlines; stories open at the publisher.
 - The Race RSS — Formula 1 news headlines where its feed is reachable; stories open at the publisher.
 - rss2json — browser-side RSS-to-JSON transport.
+- Google News RSS — source-specific recent-news discovery fallback used when publisher RSS delivery is delayed; article links continue to the original publishers.
 - FIA — official steward/document source and official Car Presentation Submissions used for the Car Development section.
 - Jina Reader — readable-text extraction of publicly accessible FIA PDFs for the in-app steward document view.
 - RacingNews365 and timepenalty — public penalty/reprimand reference pages; F1 Hub stores only small derived counts/expiry information and links back to sources.
@@ -28,4 +29,3 @@ The all-time F1 Records cards are bundled from publicly available Formula 1 care
 
 No official Formula 1 logo or official Formula 1 typeface is included in the app.
 
-- Google News RSS — source-specific recent-news discovery fallback used when publisher RSS delivery is delayed; article links continue to the original publishers.

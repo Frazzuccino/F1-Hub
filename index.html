@@ -2,8 +2,9 @@
 <html lang="en-GB">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="application-name" content="F1 Hub" />
+  <meta name="description" content="Personal Formula 1 race-weekend companion with results, standings, telemetry, weather, news and spoiler protection." />
   <meta name="format-detection" content="telephone=no" />
   <meta name="theme-color" content="#090909" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -22,8 +23,7 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icon-192.png" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="styles.css?v=1.11.10" />
+  <link rel="stylesheet" href="styles.css?v=1.12.0" />
 </head>
 <body>
   <div id="app-shell">
@@ -33,7 +33,7 @@
       </button>
       <div class="top-actions">
         <button id="install-app-btn" class="install-top-btn hidden" aria-label="Install F1 Hub">↓ APP</button>
-        <span id="connection-pill" class="pill subtle">ONLINE</span>
+        <button id="connection-pill" class="pill subtle connection-button" aria-label="Open data health">ONLINE</button>
         <button id="refresh-btn" class="icon-btn" aria-label="Refresh">↻</button>
       </div>
     </header>
@@ -58,8 +58,9 @@
     <div id="install-sheet-copy" class="muted">Install F1 Hub as a standalone app with its own icon and no browser address bar.</div>
     <div class="install-actions"><button id="install-now" class="external-btn red">INSTALL</button><button id="install-later" class="external-btn">NOT NOW</button></div>
   </div>
-  <div id="toast" class="toast" role="status"></div>
-  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="app.js?v=1.11.10"></script>
+  <div id="update-banner" class="update-banner hidden" role="status"><span>A newer F1 Hub version is available.</span><button id="update-now" class="external-btn red">UPDATE</button></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="quality-core.js?v=1.12.0"></script>
+  <script src="app.js?v=1.12.0"></script>
 </body>
 </html>

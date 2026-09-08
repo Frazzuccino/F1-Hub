@@ -22,7 +22,7 @@ const JINA = 'https://r.jina.ai/';
 const MOTORSPORT_STANDINGS = `https://www.motorsport.com/f1/standings/${YEAR}/`;
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const APP_VERSION = '1.15.0';
+const APP_VERSION = '1.16.0';
 const Q = globalThis.F1HubQuality;
 const CD = globalThis.F1HubCarDevelopment;
 const CAREER = globalThis.F1HubDriverCareer;
@@ -739,10 +739,21 @@ function latestHeadline(){
   if(spoilerActive()&&!newsSpoilersRevealed())return `<div class="card"><div class="eyebrow">LATEST NEWS · ${esc(n.source||'F1')}</div><div class="card-title" style="margin-top:6px">Headline hidden by Spoiler Mode</div><div class="news-meta">${fmtNewsTime(n.pubDate)}</div><div class="spacer"></div><button class="external-btn" onclick="setRoute('news')">OPEN NEWS</button></div>`;
   return `<a class="card clickable news-link" href="${esc(n.link)}" target="_blank" rel="noopener"><div class="eyebrow">LATEST NEWS</div><div class="card-title" style="margin-top:6px">${esc(n.title)}</div><div class="news-meta">${esc((n.source||'F1').toUpperCase())} · ${fmtNewsTime(n.pubDate)}</div></a>`;
 }
-function upcomingWeatherSessions(r){const all=sessions(r),now=Date.now();const future=all.filter(s=>new Date(s.iso).getTime()>=now-5*60e3);return future.length?future:[all.at(-1)].filter(Boolean);}
+function raceWeatherIsHistorical(r){
+  const race=sessions(r).find(s=>s.key==='race')||sessions(r).at(-1);
+  return !!race&&new Date(race.iso).getTime()<Date.now()-90*60e3;
+}
+function upcomingWeatherSessions(r){
+  const all=sessions(r);
+  if(!all.length)return [];
+  if(raceWeatherIsHistorical(r))return [all.find(s=>s.key==='race')||all.at(-1)].filter(Boolean);
+  const now=Date.now(),future=all.filter(s=>new Date(s.iso).getTime()>=now-5*60e3);
+  return future.length?future:[all.at(-1)].filter(Boolean);
+}
 function selectedWeatherSession(r){const list=upcomingWeatherSessions(r),saved=state.weatherSessionByRound[String(r.round)],found=list.find(s=>s.key===saved);return found||list[0]||sessions(r).at(-1)||null;}
 function weatherSessionTabs(r,selected){const list=upcomingWeatherSessions(r);if(list.length<=1)return '';return `<div class="weather-session-tabs" data-no-swipe>${list.map(s=>`<button class="weather-session-tab ${s.key===selected?.key?'active':''}" onclick="selectWeatherSession('${esc(r.round)}','${esc(s.key)}')">${esc(s.name)}</button>`).join('')}</div>`;}
-function weatherCard(r){const s=selectedWeatherSession(r);return `<div id="weather-card" class="card race-weather-card">${weatherSessionTabs(r,s)}<div id="weather-content"><div class="eyebrow">SESSION WEATHER${s?` · ${esc(s.name)}`:''}</div><div class="weather-loading"><div class="stat-big">—</div><div class="muted">Checking session forecast…</div></div></div></div>`;}
+function weatherLoadingCopy(r,s){return raceWeatherIsHistorical(r)&&s?.key==='race'?'Checking recorded race weather…':'Checking session forecast…';}
+function weatherCard(r){const s=selectedWeatherSession(r);return `<div id="weather-card" class="card race-weather-card">${weatherSessionTabs(r,s)}<div id="weather-content"><div class="eyebrow">SESSION WEATHER${s?` · ${esc(s.name)}`:''}</div><div class="weather-loading"><div class="stat-big">—</div><div class="muted">${weatherLoadingCopy(r,s)}</div></div></div></div>`;}
 function weatherCondition(code){
   const c=Number(code);
   if(c===0)return ['☀️','Clear'];if(c===1)return ['🌤️','Mostly clear'];if(c===2)return ['⛅','Partly cloudy'];if(c===3)return ['☁️','Overcast'];
@@ -753,22 +764,36 @@ function weatherCondition(code){
 function closestWeatherIndex(times,targetMs){
   if(!times.length)return -1;let best=0,bestD=Infinity;for(let i=0;i<times.length;i++){const d=Math.abs(new Date(times[i]).getTime()-targetMs);if(d<bestD){best=i;bestD=d;}}return best;
 }
-async function selectWeatherSession(round,key){const r=state.schedule.find(x=>String(x.round)===String(round));if(!r)return;state.weatherSessionByRound[String(round)]=key;const card=document.getElementById('weather-card');if(card){const s=selectedWeatherSession(r);card.innerHTML=`${weatherSessionTabs(r,s)}<div id="weather-content" class="weather-swap"><div class="eyebrow">SESSION WEATHER · ${esc(s?.name||'SESSION')}</div><div class="weather-loading"><div class="stat-big">—</div><div class="muted">Updating forecast…</div></div></div>`;}await loadWeatherIntoCard(r);}
+async function selectWeatherSession(round,key){const r=state.schedule.find(x=>String(x.round)===String(round));if(!r)return;state.weatherSessionByRound[String(round)]=key;const card=document.getElementById('weather-card');if(card){const s=selectedWeatherSession(r);card.innerHTML=`${weatherSessionTabs(r,s)}<div id="weather-content" class="weather-swap"><div class="eyebrow">SESSION WEATHER · ${esc(s?.name||'SESSION')}</div><div class="weather-loading"><div class="stat-big">—</div><div class="muted">${weatherLoadingCopy(r,s)}</div></div></div>`;}await loadWeatherIntoCard(r);}
 window.selectWeatherSession=selectWeatherSession;
 async function loadWeatherIntoCard(r){
   const el=document.getElementById('weather-card');if(!el)return;const s=selectedWeatherSession(r),content=()=>document.getElementById('weather-content');if(!s)return;
+  const historical=raceWeatherIsHistorical(r)&&s.key==='race';
   try{
-    const l=r.Circuit.Location;
-    const url=`https://api.open-meteo.com/v1/forecast?latitude=${l.lat}&longitude=${l.long}&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,wind_speed_10m,wind_gusts_10m&timezone=${encodeURIComponent(UK_TZ)}&forecast_days=16`;
-    const w=await fetchJSON(url,`weather-v3-${r.Circuit.circuitId}`,30*60e3);
-    const target=new Date(s.iso),times=w.hourly?.time||[],i=closestWeatherIndex(times,target.getTime());
-    if(i<0||Math.abs(new Date(times[i]).getTime()-target.getTime())>20*3600e3){
-      const c=content();if(c)c.innerHTML=`<div class="eyebrow">SESSION WEATHER · ${esc(s.name)}</div><div class="card-title" style="margin-top:7px">Forecast not available yet</div><div class="muted" style="margin-top:5px">The detailed ${esc(s.name)} forecast appears when the session enters the forecast window.</div><div class="spacer"></div><button class="external-btn" onclick="setRoute('radar:${r.round}')">OPEN RAIN RADAR</button>`;return;
+    const l=r.Circuit.Location,target=new Date(s.iso),day=target.toISOString().slice(0,10);
+    const hourlyFields='temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,wind_speed_10m,wind_gusts_10m';
+    const url=historical
+      ?`https://archive-api.open-meteo.com/v1/archive?latitude=${l.lat}&longitude=${l.long}&start_date=${day}&end_date=${day}&hourly=${hourlyFields}&timezone=${encodeURIComponent(UK_TZ)}`
+      :`https://api.open-meteo.com/v1/forecast?latitude=${l.lat}&longitude=${l.long}&hourly=${hourlyFields}&timezone=${encodeURIComponent(UK_TZ)}&forecast_days=16`;
+    const cacheKey=`weather-${historical?'archive':'forecast'}-${r.Circuit.circuitId}-${day}-${s.key}`;
+    const w=await fetchJSON(url,cacheKey,historical?365*24*60*60e3:30*60e3);
+    const times=w.hourly?.time||[],i=closestWeatherIndex(times,target.getTime()),tolerance=historical?4*3600e3:20*3600e3;
+    if(i<0||Math.abs(new Date(times[i]).getTime()-target.getTime())>tolerance){
+      const c=content();if(c)c.innerHTML=historical
+        ?`<div class="eyebrow">RACE WEATHER · ${fmtDate(s.iso,{day:'numeric',month:'short',year:'numeric'})}</div><div class="card-title" style="margin-top:7px">Historical weather unavailable</div><div class="muted" style="margin-top:5px">Recorded race-start weather could not be matched for this event.</div>`
+        :`<div class="eyebrow">SESSION WEATHER · ${esc(s.name)}</div><div class="card-title" style="margin-top:7px">Forecast not available yet</div><div class="muted" style="margin-top:5px">The detailed ${esc(s.name)} forecast appears when the session enters the forecast window.</div><div class="spacer"></div><button class="external-btn" onclick="setRoute('radar:${r.round}')">OPEN RAIN RADAR</button>`;
+      return;
     }
     const temp=Math.round(w.hourly.temperature_2m?.[i]??0),feel=Math.round(w.hourly.apparent_temperature?.[i]??temp),rain=Math.round(w.hourly.precipitation_probability?.[i]??0),prec=Number(w.hourly.precipitation?.[i]??0),wind=Math.round(w.hourly.wind_speed_10m?.[i]??0),gust=Math.round(w.hourly.wind_gusts_10m?.[i]??0),[icon,condition]=weatherCondition(w.hourly.weather_code?.[i]);
     const offsets=[-2,-1,0,1,2],hourly=offsets.map(h=>{const at=target.getTime()+h*3600e3,j=closestWeatherIndex(times,at);if(j<0||Math.abs(new Date(times[j]).getTime()-at)>40*60e3)return '';const [ic]=weatherCondition(w.hourly.weather_code?.[j]);return `<div class="weather-hour ${h===0?'race-hour':''}"><b>${fmtTime(new Date(at).toISOString())}</b><span>${ic}</span><strong>${Math.round(w.hourly.temperature_2m?.[j]??0)}°</strong><small>💧 ${Math.round(w.hourly.precipitation_probability?.[j]??0)}%</small></div>`;}).join('');
-    const c=content();if(c)c.innerHTML=`<div class="weather-head"><div><div class="eyebrow">${esc(s.name)} WEATHER · ${fmtTime(s.iso)}</div><div class="weather-main"><span class="weather-icon">${icon}</span><div><div class="stat-big">${temp}°C</div><div class="weather-condition">${esc(condition)}</div></div></div></div><div class="weather-rain ${rain>=40?'wet':''}"><b>${rain}%</b><small>RAIN</small></div></div><div class="weather-metrics"><div><b>${feel}°</b><small>FEELS</small></div><div><b>${wind}</b><small>WIND km/h</small></div><div><b>${gust}</b><small>GUST km/h</small></div><div><b>${prec.toFixed(1)}</b><small>RAIN mm</small></div></div><div class="weather-hours">${hourly}</div><div class="weather-actions"><button class="external-btn red" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button><span class="muted">${esc(s.name)} start forecast · UK time</span></div>`;
-  }catch{const c=content();if(c)c.innerHTML=`<div class="eyebrow">SESSION WEATHER · ${esc(s.name)}</div><div class="card-title" style="margin-top:7px">Forecast unavailable</div><div class="muted" style="margin-top:5px">Pull to refresh or open the rain radar.</div><div class="spacer"></div><button class="external-btn" onclick="setRoute('radar:${r.round}')">OPEN RAIN RADAR</button>`;}
+    const actionHtml=historical
+      ?`<div class="weather-actions"><span class="muted">Recorded race-start weather · UK time</span></div>`
+      :`<div class="weather-actions"><button class="external-btn red" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button><span class="muted">${esc(s.name)} start forecast · UK time</span></div>`;
+    const eyebrow=historical?`RACE WEATHER · ${fmtDateTime(s.iso)}`:`${esc(s.name)} WEATHER · ${fmtTime(s.iso)}`;
+    const c=content();if(c)c.innerHTML=`<div class="weather-head"><div><div class="eyebrow">${eyebrow}</div><div class="weather-main"><span class="weather-icon">${icon}</span><div><div class="stat-big">${temp}°C</div><div class="weather-condition">${esc(condition)}</div></div></div></div><div class="weather-rain ${rain>=40?'wet':''}"><b>${rain}%</b><small>RAIN</small></div></div><div class="weather-metrics"><div><b>${feel}°</b><small>FEELS</small></div><div><b>${wind}</b><small>WIND km/h</small></div><div><b>${gust}</b><small>GUST km/h</small></div><div><b>${prec.toFixed(1)}</b><small>RAIN mm</small></div></div><div class="weather-hours">${hourly}</div>${actionHtml}`;
+  }catch{const c=content();if(c)c.innerHTML=historical
+    ?`<div class="eyebrow">RACE WEATHER · ${esc(s.name)}</div><div class="card-title" style="margin-top:7px">Historical weather unavailable</div><div class="muted" style="margin-top:5px">Pull to refresh later if you'd like to try again.</div>`
+    :`<div class="eyebrow">SESSION WEATHER · ${esc(s.name)}</div><div class="card-title" style="margin-top:7px">Forecast unavailable</div><div class="muted" style="margin-top:5px">Pull to refresh or open the rain radar.</div><div class="spacer"></div><button class="external-btn" onclick="setRoute('radar:${r.round}')">OPEN RAIN RADAR</button>`;}
 }
 
 function calendarMonthLabel(r){return new Intl.DateTimeFormat('en-GB',{timeZone:UK_TZ,month:'long'}).format(new Date(raceIso(r))).toUpperCase();}
@@ -1244,55 +1269,69 @@ function carSchematicSvg(team,updates){
     const one=(pt,side=false)=>pt?`<g class="car-marker ${side?'side-marker':''}" role="button" tabindex="0" onclick="focusCarUpdate('${ref}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();focusCarUpdate('${ref}')}"><title>${esc(title)}</title><circle cx="${pt[0]+d}" cy="${pt[1]+(side?d/4:d)}" r="13"></circle><text x="${pt[0]+d}" y="${pt[1]+(side?d/4:d)+4}">${u.mapIndex}</text></g>`:'';
     return one(z.top)+one(z.side,true);
   }).join('');
-  return `<svg class="car-schematic car-schematic-v2" viewBox="0 0 1000 440" role="img" aria-label="Detailed Formula 1 car schematic showing ${mapped.filter(x=>x.maps?.length||x.map.id!=='unmapped').length} mapped update locations for ${esc(team)}" style="--car-accent:${accent}">
-    <defs><linearGradient id="carBody-${carTeamSlug(team)}" x1="0" x2="1"><stop offset="0" stop-color="#151515"/><stop offset=".55" stop-color="#222"/><stop offset="1" stop-color="#111"/></linearGradient></defs>
+  return `<svg class="car-schematic car-schematic-v2" viewBox="0 0 1000 470" role="img" aria-label="Detailed Formula 1 car schematic showing ${mapped.filter(x=>x.maps?.length||x.map.id!=='unmapped').length} mapped update locations for ${esc(team)}" style="--car-accent:${accent}">
+    <defs>
+      <linearGradient id="carGrid-${carTeamSlug(team)}" x1="0" x2="1"><stop offset="0" stop-color="#0b0b0b"/><stop offset="1" stop-color="#080808"/></linearGradient>
+    </defs>
+    <rect x="0" y="0" width="1000" height="470" fill="url(#carGrid-${carTeamSlug(team)})" rx="20"/>
+    <g class="grid-lines" opacity=".14">
+      <path d="M30 56 H970 M30 230 H970 M30 415 H970"/>
+      <path d="M210 30 V210 M500 30 V210 M790 30 V210"/>
+      <path d="M205 250 V432 M500 250 V432 M795 250 V432"/>
+    </g>
     <g class="car-view top-view">
-      <text class="view-label" x="32" y="25">TOP VIEW</text>
-      <!-- front wing / nose -->
-      <path class="aero-surface front-wing-element" d="M42 101 Q88 80 166 88 L184 102 L184 138 L166 152 Q88 160 42 139 Z"/>
-      <rect class="endplate" x="37" y="83" width="13" height="74" rx="3"/><rect class="endplate" x="176" y="90" width="10" height="60" rx="3"/>
-      <path class="car-body" d="M168 112 L254 104 L345 96 L395 103 L395 137 L345 144 L254 136 L168 128 Z"/>
-      <path class="nose-ridge" d="M174 120 H347"/>
-      <!-- front wheels and suspension -->
-      <rect class="tyre tyre-top" x="270" y="43" width="69" height="48" rx="12"/><rect class="tyre tyre-top" x="270" y="149" width="69" height="48" rx="12"/>
-      <path class="suspension" d="M300 91 L354 111 M300 149 L354 129 M329 91 L368 110 M329 149 L368 130"/>
-      <!-- floor, sidepods, cockpit -->
-      <path class="floor-shape" d="M350 83 L420 65 L614 57 L700 76 L748 97 L820 105 L820 135 L748 143 L700 164 L614 183 L420 174 L350 157 Z"/>
-      <path class="sidepod-shape" d="M397 88 Q444 72 520 72 L610 83 L650 105 L650 135 L610 157 L520 168 Q444 168 397 152 Z"/>
-      <path class="cockpit-shape" d="M425 104 Q458 73 500 87 Q534 99 551 120 Q534 142 500 153 Q458 166 425 136 Z"/>
-      <path class="halo-shape" d="M454 104 Q482 86 510 104 L530 120 M454 136 Q482 154 510 136"/>
-      <path class="airbox" d="M518 92 L550 102 L558 120 L550 138 L518 148 Z"/>
-      <path class="floor-edge-line" d="M374 159 Q505 186 694 155"/>
-      <!-- rear suspension / wheels / diffuser / wing -->
-      <rect class="tyre tyre-top" x="727" y="35" width="82" height="55" rx="13"/><rect class="tyre tyre-top" x="727" y="150" width="82" height="55" rx="13"/>
-      <path class="suspension" d="M690 96 L754 90 M690 144 L754 150 M706 106 L778 90 M706 134 L778 150"/>
-      <path class="rear-body" d="M645 102 L720 96 L850 105 L868 119 L850 135 L720 144 L645 138 Z"/>
-      <path class="diffuser-shape" d="M796 104 L862 92 L879 103 L879 137 L862 148 L796 136 Z"/>
-      <rect class="rear-wing-element" x="866" y="75" width="96" height="90" rx="5"/><rect class="rear-wing-main" x="854" y="91" width="112" height="15" rx="4"/><rect class="rear-wing-main" x="854" y="134" width="112" height="15" rx="4"/>
-      <path class="car-highlight-line" d="M52 120 H180 M354 82 Q560 46 817 104 M817 136 Q560 194 354 158 M860 120 H958"/>
+      <text class="view-label" x="34" y="28">TOP VIEW</text>
+      <path class="outline" d="M54 119 L100 104 L160 104 L165 92 L192 92 L192 146 L165 146 L160 135 L100 135 L54 122"/>
+      <path class="outline" d="M171 117 L262 109 L340 99 L374 105 L374 136 L340 143 L262 133 L171 125"/>
+      <path class="detail" d="M177 121 H334"/>
+      <path class="detail" d="M195 117 L245 120 L287 120"/>
+      <rect class="tyre tyre-top" x="260" y="48" width="72" height="49" rx="14"/>
+      <rect class="tyre tyre-top" x="260" y="143" width="72" height="49" rx="14"/>
+      <path class="suspension" d="M297 97 L352 112 M297 143 L352 128 M319 97 L362 113 M319 143 L362 127"/>
+      <path class="outline" d="M356 88 Q412 65 504 63 H606 Q688 65 753 86 L815 101 H872 V140 H815 L753 155 Q688 178 606 180 H504 Q412 178 356 155 Z"/>
+      <path class="inner-outline" d="M404 93 Q446 76 512 76 H595 Q650 79 696 97 L737 116 L696 135 Q650 153 595 156 H512 Q446 156 404 142 Z"/>
+      <path class="cockpit-shape" d="M443 106 Q471 81 506 81 Q547 82 573 107 Q549 138 506 149 Q470 144 443 124 Z"/>
+      <path class="halo-shape" d="M457 107 Q482 89 506 106 M457 124 Q482 142 506 124 M506 106 L530 122"/>
+      <path class="airbox" d="M552 90 L582 102 L590 119 L582 136 L552 147 Q545 119 552 90 Z"/>
+      <path class="detail" d="M382 157 Q510 184 719 155"/>
+      <path class="detail" d="M379 86 Q516 56 721 86"/>
+      <rect class="tyre tyre-top" x="734" y="43" width="84" height="54" rx="15"/>
+      <rect class="tyre tyre-top" x="734" y="142" width="84" height="54" rx="15"/>
+      <path class="suspension" d="M691 98 L755 92 M691 142 L755 148 M707 108 L779 92 M707 132 L779 148"/>
+      <path class="outline" d="M669 106 L759 98 L843 102 L875 112 L875 128 L843 138 L759 142 L669 133 Z"/>
+      <path class="detail" d="M817 104 L902 104"/>
+      <path class="detail" d="M817 136 L902 136"/>
+      <path class="rear-wing-main" d="M874 88 H963 V104 H874 Z"/>
+      <path class="rear-wing-main" d="M874 136 H963 V152 H874 Z"/>
+      <rect class="endplate" x="960" y="78" width="10" height="84" rx="3"/>
+      <path class="car-highlight-line" d="M53 119 H156 M173 119 H372 M374 87 Q533 48 820 103 M820 137 Q533 202 374 157 M874 120 H966"/>
     </g>
     <g class="car-view side-view">
-      <text class="view-label" x="32" y="235">SIDE VIEW</text>
-      <!-- floor and front wing -->
-      <path class="floor-side" d="M165 370 H843 L861 380 H163 Z"/>
-      <path class="aero-surface front-wing-side" d="M45 351 L160 342 L183 350 L177 363 L48 368 Z"/><rect class="endplate" x="44" y="326" width="12" height="44" rx="3"/>
-      <!-- wheels -->
-      <circle class="tyre" cx="282" cy="347" r="45"/><circle class="wheel-core" cx="282" cy="347" r="20"/><circle class="wheel-hub" cx="282" cy="347" r="7"/>
-      <circle class="tyre" cx="773" cy="345" r="48"/><circle class="wheel-core" cx="773" cy="345" r="21"/><circle class="wheel-hub" cx="773" cy="345" r="7"/>
-      <!-- chassis -->
-      <path class="car-body" d="M150 344 L215 327 L337 318 L386 296 L459 284 L548 282 L604 294 L655 300 L711 304 L737 318 L735 355 L326 358 L208 355 Z"/>
-      <path class="sidepod-shape" d="M457 304 Q520 288 608 300 L650 318 L631 350 H430 L418 330 Z"/>
-      <path class="nose-ridge" d="M154 342 Q247 326 365 321"/>
-      <path class="cockpit-shape" d="M420 301 Q453 253 510 259 Q545 263 568 287 L551 308 L443 313 Z"/>
-      <path class="halo-shape" d="M444 294 Q468 250 509 265 Q531 273 541 294 M480 265 V302"/>
-      <path class="airbox" d="M523 263 L554 238 L586 251 L599 289 L555 290 Z"/>
-      <path class="engine-cover" d="M568 271 Q643 263 722 302 L731 326 L650 326 L611 301 Z"/>
-      <path class="suspension" d="M236 324 L282 303 M236 354 L282 391 M704 316 L773 297 M704 352 L773 393"/>
-      <!-- rear aero -->
-      <path class="diffuser-shape" d="M718 354 L842 352 L858 375 L801 379 L742 370 Z"/>
-      <rect class="rear-wing-element" x="868" y="251" width="19" height="112" rx="4"/><path class="rear-wing-main" d="M821 260 H952 L946 276 H830 Z"/><path class="rear-wing-main" d="M836 287 H950 L946 302 H842 Z"/>
-      <path class="beam-wing-line" d="M808 320 Q850 305 892 312"/>
-      <path class="car-highlight-line" d="M51 358 Q201 340 368 319 Q529 274 712 309 M326 360 H842"/>
+      <text class="view-label" x="34" y="247">SIDE VIEW</text>
+      <path class="outline" d="M58 379 L145 369 L185 356 L262 346 L331 337 L382 316 L432 307 L489 300 L560 296 L626 300 L700 307 L742 312 L777 324 L777 356 L303 362 L136 360 Z"/>
+      <path class="detail" d="M61 378 Q211 352 390 329 Q585 292 744 315"/>
+      <path class="floor-side" d="M171 379 H823 L846 390 H159 Z"/>
+      <path class="aero-surface front-wing-side" d="M45 370 L152 361 L189 367 L177 378 L50 385 Z"/>
+      <rect class="endplate" x="43" y="347" width="11" height="40" rx="3"/>
+      <circle class="tyre" cx="282" cy="353" r="48"/>
+      <circle class="wheel-core" cx="282" cy="353" r="21"/>
+      <circle class="wheel-hub" cx="282" cy="353" r="7"/>
+      <circle class="tyre" cx="776" cy="349" r="51"/>
+      <circle class="wheel-core" cx="776" cy="349" r="22"/>
+      <circle class="wheel-hub" cx="776" cy="349" r="7"/>
+      <path class="inner-outline" d="M416 320 Q500 299 602 305 L646 322 L636 348 H422 L408 336 Z"/>
+      <path class="cockpit-shape" d="M421 310 Q454 259 512 264 Q552 267 576 290 L552 311 L443 317 Z"/>
+      <path class="halo-shape" d="M444 303 Q469 255 510 270 Q532 277 542 299 M479 270 V311"/>
+      <path class="airbox" d="M524 269 L554 238 L585 247 L599 286 L554 289 Z"/>
+      <path class="engine-cover" d="M564 276 Q645 265 724 307 L734 326 L650 327 L608 301 Z"/>
+      <path class="suspension" d="M235 330 L282 308 M236 356 L282 395 M704 320 L776 299 M704 355 L776 399"/>
+      <path class="detail" d="M445 346 Q520 331 642 332"/>
+      <path class="diffuser-shape" d="M716 355 L838 352 L853 385 L806 388 L742 377 Z"/>
+      <path class="beam-wing-line" d="M804 320 Q851 305 894 313"/>
+      <path class="rear-wing-main" d="M829 264 H952 L945 278 H837 Z"/>
+      <path class="rear-wing-main" d="M842 290 H950 L946 304 H848 Z"/>
+      <rect class="rear-wing-element" x="868" y="255" width="18" height="112" rx="4"/>
+      <path class="car-highlight-line" d="M61 378 Q200 350 390 329 Q571 287 733 313 M329 361 H840"/>
     </g>${markers}
   </svg>`;
 }
@@ -1905,13 +1944,73 @@ async function renderTrends(){
     view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Trends')+evolutionChart(evo.series,labels,colours)+`<div class="spacer"></div>${titleBlock('CONSTRUCTORS','Driver Contribution')}<div class="grid two">${contributions.map(c=>`<div class="card contribution-card" style="border-top:4px solid ${teamColour(c.team)}"><div class="eyebrow">${esc(c.team)}</div><div class="stat-big">${c.total}<small> pts</small></div><div class="contribution-bar" style="color:${teamColour(c.team)}">${c.members.map((m,i)=>`<i style="width:${c.total?Math.max(2,m.pts/c.total*100):0}%;opacity:${i?0.55:1}"></i>`).join('')}</div>${c.members.map(m=>`<div class="history-leader"><b>${esc(m.code)}</b><span>${m.pts} pts · ${c.total?Math.round(m.pts/c.total*100):0}%</span></div>`).join('')}</div>`).join('')}</div><div class="source-note">Points evolution uses published race and sprint classifications. Constructor contribution compares the current points held by each team's listed drivers with the constructor total.</div>`;
   }catch{view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Trends')+'<div class="error-box">Championship trends could not be calculated right now.</div>';}
 }
+function compareMetricBar(label,a,b,options={}){
+  const higher=options.higher!==false;
+  const av=Number(a)||0,bv=Number(b)||0,max=Math.max(1,av,bv);
+  const aw=max?av/max*100:0,bw=max?bv/max*100:0;
+  const aWin=higher?av>bv:av<bv,bWin=higher?bv>av:bv<av,tie=av===bv;
+  return `<div class="compare-metric"><div class="compare-metric-top"><span>${esc(label)}</span><b>${tie?'EVEN':aWin?esc(options.aCode||'A'):bWin?esc(options.bCode||'B'):'—'}</b></div><div class="compare-metric-values"><strong class="${aWin&&!tie?'winner':''}">${Number.isFinite(av)?av:esc(a)}</strong><small>${options.aCode||'A'}</small><div class="compare-bar-track"><i class="a" style="width:${aw}%"></i><i class="b" style="width:${bw}%"></i></div><small>${options.bCode||'B'}</small><strong class="${bWin&&!tie?'winner':''}">${Number.isFinite(bv)?bv:esc(b)}</strong></div></div>`;
+}
+function compareDriverHero(stat,standing,accent){
+  const imgs=driverPhotoUrls(standing),img=imgs[0],fb=imgs[1]||'';
+  return `<div class="card compare-driver-card" style="--team:${accent}"><div class="compare-driver-head"><div><div class="eyebrow">#${esc(standing.Driver.permanentNumber||'—')} · ${esc(stat.code)}</div><div class="compare-driver-name">${esc(stat.name)}</div><div class="compare-driver-meta">${esc(stat.nationality)} · ${esc(stat.team)}</div></div><div class="compare-champ-pill"><b>P${esc(stat.champPos||'—')}</b><small>CHAMP</small></div></div><div class="compare-driver-media">${img?`<img class="compare-driver-photo" src="${esc(img)}" data-fallback="${esc(fb)}" data-code="${esc(stat.code)}" onerror="driverPhotoError(this)" alt="${esc(stat.name)}" loading="lazy">`:`<div class="compare-driver-photo avatar">${esc(stat.code)}</div>`}</div></div>`;
+}
+function compareRadarSvg(a,b,colours){
+  const metrics=[
+    ['POINTS',Number(a.points||0),Number(b.points||0),true],
+    ['WINS',Number(a.wins||0),Number(b.wins||0),true],
+    ['PODIUMS',Number(a.pod||0),Number(b.pod||0),true],
+    ['POLES',Number(a.poles||0),Number(b.poles||0),true],
+    ['AVG FIN',Number(a.avgFNum||0),Number(b.avgFNum||0),false],
+    ['AVG Q',Number(a.avgQNum||0),Number(b.avgQNum||0),false]
+  ];
+  const cx=180,cy=180,rMax=118;
+  const ptsFor=(idx,val,max,invert=false)=>{const ang=(-90+(360/metrics.length)*idx)*Math.PI/180;const norm=max<=0?.1:(invert?(1-((val-1)/Math.max(1,max-1))):(val/max));const rr=28+Math.max(.08,Math.min(.98,norm))*rMax;return [cx+Math.cos(ang)*rr,cy+Math.sin(ang)*rr];};
+  const outer=metrics.map((m,idx)=>{const ang=(-90+(360/metrics.length)*idx)*Math.PI/180;return [cx+Math.cos(ang)*(rMax+18),cy+Math.sin(ang)*(rMax+18),m[0],ang];});
+  const poly=(side)=>metrics.map((m,idx)=>{const max=Math.max(1,m[1],m[2]);const val=side==='a'?m[1]:m[2];const invert=m[3]===false;const [x,y]=ptsFor(idx,val,max,invert);return `${x.toFixed(1)},${y.toFixed(1)}`;}).join(' ');
+  const grid=[.25,.5,.75,1].map(level=>`<polygon points="${metrics.map((m,idx)=>{const ang=(-90+(360/metrics.length)*idx)*Math.PI/180;const rr=28+level*rMax;return `${(cx+Math.cos(ang)*rr).toFixed(1)},${(cy+Math.sin(ang)*rr).toFixed(1)}`;}).join(' ')}"></polygon>`).join('');
+  const spokes=metrics.map((m,idx)=>{const ang=(-90+(360/metrics.length)*idx)*Math.PI/180;return `<line x1="${cx}" y1="${cy}" x2="${(cx+Math.cos(ang)*(rMax+8)).toFixed(1)}" y2="${(cy+Math.sin(ang)*(rMax+8)).toFixed(1)}"></line>`;}).join('');
+  const labels=outer.map(([x,y,label,ang])=>`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${Math.abs(Math.cos(ang))<0.25?'middle':Math.cos(ang)>0?'start':'end'}">${esc(label)}</text>`).join('');
+  return `<div class="card compare-radar-card"><div class="eyebrow">SEASON PROFILE</div><svg class="compare-radar" viewBox="0 0 360 360" role="img" aria-label="Driver comparison radar chart"><g class="compare-radar-grid">${grid}${spokes}</g><polygon class="compare-radar-poly a" points="${poly('a')}" style="--team:${colours.a}"></polygon><polygon class="compare-radar-poly b" points="${poly('b')}" style="--team:${colours.b}"></polygon><circle cx="${cx}" cy="${cy}" r="5" class="compare-radar-centre"></circle><g class="compare-radar-labels">${labels}</g></svg><div class="compare-radar-legend"><span><i style="background:${colours.a}"></i>${esc(a.code)} · ${esc(a.team)}</span><span><i style="background:${colours.b}"></i>${esc(b.code)} · ${esc(b.team)}</span></div></div>`;
+}
+function compareSummaryCard(a,b,h){
+  const pointDiff=Math.abs(Number(a.points||0)-Number(b.points||0));
+  const leader=Number(a.points||0)===Number(b.points||0)?'Points level':`${Number(a.points||0)>Number(b.points||0)?a.code:b.code} leads by ${pointDiff} point${pointDiff===1?'':'s'}`;
+  return `<div class="card compare-summary-card"><div class="eyebrow">HEAD TO HEAD</div><div class="compare-summary-lead">${esc(leader)}</div><div class="compare-summary-grid"><div><b>${h.qA}</b><small>${esc(a.code)} QUALI WINS</small></div><div><b>${h.qB}</b><small>${esc(b.code)} QUALI WINS</small></div><div><b>${h.raceA}</b><small>${esc(a.code)} RACE WINS</small></div><div><b>${h.raceB}</b><small>${esc(b.code)} RACE WINS</small></div></div></div>`;
+}
 function renderCompare(){
   const opts=state.drivers.map(s=>`<option value="${esc(s.Driver.driverId)}">${esc(fullName(s.Driver))}</option>`).join('');
   view.innerHTML=titleBlock(`${YEAR} SEASON`,'Driver Compare')+`<div class="card"><div class="grid two"><label><div class="eyebrow">DRIVER A</div><select id="cmp-a">${opts}</select></label><label><div class="eyebrow">DRIVER B</div><select id="cmp-b">${opts}</select></label></div><div class="spacer"></div><button id="cmp-go" class="external-btn red">COMPARE</button></div><div id="cmp-out" class="spacer"></div>`;
   const a=document.getElementById('cmp-a'),b=document.getElementById('cmp-b');b.selectedIndex=Math.min(1,b.options.length-1);
-  document.getElementById('cmp-go').onclick=async()=>{const out=document.getElementById('cmp-out');if(a.value===b.value){out.innerHTML='<div class="error-box">Choose two different drivers.</div>';return;}out.innerHTML='<div class="loader">Comparing…</div>';try{const [[races,quali],sprints]=await Promise.all([getSeasonData(),fetchSeasonSprints()]);const byId=Object.fromEntries(state.drivers.map(s=>[s.Driver.driverId,s])),aa=simpleDriverStats(a.value,races,quali,byId),bb=simpleDriverStats(b.value,races,quali,byId),h=pairHeadToHead(a.value,b.value,races,quali),evo=pointsEvolution([a.value,b.value],races,sprints),labels={[a.value]:aa.code,[b.value]:bb.code},colours={[a.value]:teamColour(byId[a.value]?.Constructors?.at(-1)?.name||''),[b.value]:teamColour(byId[b.value]?.Constructors?.at(-1)?.name||'')};out.innerHTML=`<div class="card battle-card"><div class="battle-head"><div class="battle-driver">${aa.code}</div><div class="battle-vs">VS</div><div class="battle-driver">${bb.code}</div></div>${[['POINTS','points'],['WINS','wins'],['PODIUMS','pod'],['POLES','poles'],['DNFs','dnfs'],['AVG FINISH','avgF']].map(([l,k])=>`<div class="battle-stat"><b>${aa[k]}</b><div class="mid">${l}</div><b>${bb[k]}</b></div>`).join('')}<div class="battle-stat"><b>${h.qA}</b><div class="mid">QUALI H2H</div><b>${h.qB}</b></div><div class="battle-stat"><b>${h.raceA}</b><div class="mid">RACE H2H</div><b>${h.raceB}</b></div></div><div class="spacer"></div>${evolutionChart(evo.series,labels,colours)}<div class="spacer"></div><div class="actions"><button class="external-btn" onclick="shareText('F1 Hub driver comparison','${aa.code} vs ${bb.code}: ${aa.points}-${bb.points} pts, qualifying H2H ${h.qA}-${h.qB}, race H2H ${h.raceA}-${h.raceB}.')">SHARE COMPARISON</button></div>`;}catch{out.innerHTML='<div class="error-box">Could not load season history.</div>';}};
+  document.getElementById('cmp-go').onclick=async()=>{
+    const out=document.getElementById('cmp-out');
+    if(a.value===b.value){out.innerHTML='<div class="error-box">Choose two different drivers.</div>';return;}
+    out.innerHTML='<div class="loader">Comparing…</div>';
+    try{
+      const [[races,quali],sprints]=await Promise.all([getSeasonData(),fetchSeasonSprints()]);
+      const byId=Object.fromEntries(state.drivers.map(s=>[s.Driver.driverId,s]));
+      const sa=byId[a.value],sb=byId[b.value],aa=simpleDriverStats(a.value,races,quali,byId),bb=simpleDriverStats(b.value,races,quali,byId),h=pairHeadToHead(a.value,b.value,races,quali),evo=pointsEvolution([a.value,b.value],races,sprints),labels={[a.value]:aa.code,[b.value]:bb.code},colours={a:teamColour(sa?.Constructors?.at(-1)?.name||''),b:teamColour(sb?.Constructors?.at(-1)?.name||''),[a.value]:teamColour(sa?.Constructors?.at(-1)?.name||''),[b.value]:teamColour(sb?.Constructors?.at(-1)?.name||'')};
+      const metrics=[
+        compareMetricBar('POINTS',Number(aa.points||0),Number(bb.points||0),{aCode:aa.code,bCode:bb.code}),
+        compareMetricBar('WINS',Number(aa.wins||0),Number(bb.wins||0),{aCode:aa.code,bCode:bb.code}),
+        compareMetricBar('PODIUMS',Number(aa.pod||0),Number(bb.pod||0),{aCode:aa.code,bCode:bb.code}),
+        compareMetricBar('POLES',Number(aa.poles||0),Number(bb.poles||0),{aCode:aa.code,bCode:bb.code}),
+        compareMetricBar('DNFS',Number(aa.dnfs||0),Number(bb.dnfs||0),{aCode:aa.code,bCode:bb.code,higher:false}),
+        compareMetricBar('AVG FINISH',Number(aa.avgFNum||0),Number(bb.avgFNum||0),{aCode:aa.code,bCode:bb.code,higher:false}),
+        compareMetricBar('AVG QUALI',Number(aa.avgQNum||0),Number(bb.avgQNum||0),{aCode:aa.code,bCode:bb.code,higher:false})
+      ].join('');
+      out.innerHTML=`<div class="grid two compare-hero-grid">${compareDriverHero(aa,sa,colours.a)}${compareDriverHero(bb,sb,colours.b)}</div><div class="spacer"></div>${compareSummaryCard(aa,bb,h)}<div class="spacer"></div><div class="grid desktop-two compare-deck"><div>${compareRadarSvg(aa,bb,colours)}</div><div class="card compare-metrics-card"><div class="eyebrow">METRICS</div>${metrics}</div></div><div class="spacer"></div>${evolutionChart(evo.series,labels,colours)}<div class="spacer"></div><div class="actions"><button class="external-btn" onclick="shareText('F1 Hub driver comparison','${aa.code} vs ${bb.code}: ${aa.points}-${bb.points} pts, qualifying H2H ${h.qA}-${h.qB}, race H2H ${h.raceA}-${h.raceB}.')">SHARE COMPARISON</button></div>`;
+    }catch{out.innerHTML='<div class="error-box">Could not load season history.</div>';}
+  };
 }
-function simpleDriverStats(id,races,quali,byId){let pod=0,dnfs=0,poles=0,fin=[];for(const r of races){const x=(r.Results||[]).find(z=>z.Driver.driverId===id);if(x){if(Number(x.position)<=3)pod++;if(dnf(x))dnfs++;if(Number(x.position))fin.push(Number(x.position));}}for(const q of quali){const x=(q.QualifyingResults||[]).find(z=>z.Driver.driverId===id);if(Number(x?.position)===1)poles++;}const s=byId[id];return {code:driverCode(s.Driver),points:s.points,wins:s.wins,pod,poles,dnfs,avgF:fin.length?(fin.reduce((a,b)=>a+b)/fin.length).toFixed(1):'—'};}
+function simpleDriverStats(id,races,quali,byId){
+  let pod=0,dnfs=0,poles=0,fin=[],qpos=[];
+  for(const r of races){const x=(r.Results||[]).find(z=>z.Driver.driverId===id);if(x){if(Number(x.position)<=3)pod++;if(dnf(x))dnfs++;if(Number(x.position))fin.push(Number(x.position));}}
+  for(const q of quali){const x=(q.QualifyingResults||[]).find(z=>z.Driver.driverId===id);if(x&&Number(x.position))qpos.push(Number(x.position));if(Number(x?.position)===1)poles++;}
+  const s=byId[id],team=s?.Constructors?.at(-1)?.name||'';
+  const avgF=fin.length?(fin.reduce((a,b)=>a+b,0)/fin.length):null,avgQ=qpos.length?(qpos.reduce((a,b)=>a+b,0)/qpos.length):null;
+  return {id,name:fullName(s.Driver),nationality:s.Driver.nationality,team,champPos:Number(s.position||0),code:driverCode(s.Driver),points:Number(s.points||0),wins:Number(s.wins||0),pod,poles,dnfs,avgF:avgF!==null?avgF.toFixed(1):'—',avgFNum:avgF||0,avgQ:avgQ!==null?avgQ.toFixed(1):'—',avgQNum:avgQ||0};
+}
 
 function setupPullToRefresh(){
   const indicator=document.getElementById('pull-indicator');
@@ -1958,7 +2057,7 @@ function setupSwipeNavigation(){
   const preview=document.createElement('div');preview.className='swipe-preview';preview.setAttribute('aria-hidden','true');document.getElementById('app-shell')?.insertBefore?.(preview,view);
   const paint=(dx,tgt)=>{
     cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{
-      const width=Math.max(1,window.innerWidth),edge=tgt?Math.max(-width,Math.min(width,dx)):dx*.14,progress=Math.min(1,Math.abs(edge)/width);
+      const width=Math.max(1,window.innerWidth),edge=tgt?Math.max(-width,Math.min(width,dx)):dx*.16,progress=Math.min(1,Math.abs(edge)/width);
       view.classList.add('swipe-dragging');view.style.transition='none';view.style.transform=`translate3d(${edge}px,0,0)`;
       if(tgt){const meta=SWIPE_META[tgt]||['',''];preview.innerHTML=`<span>${meta[0]}</span><b>${meta[1]}</b><small>RELEASE TO OPEN</small>`;preview.classList.add('show');preview.classList.toggle('from-right',dx<0);preview.classList.toggle('from-left',dx>0);preview.style.setProperty('--swipe-progress',String(progress));}
       else{preview.classList.remove('show');}
@@ -1984,13 +2083,16 @@ function setupSwipeNavigation(){
   },{passive:true});
   window.addEventListener('touchmove',e=>{
     if(!tracking||!e.touches?.length)return;const p=e.touches[0],dx=p.clientX-startX,dy=p.clientY-startY;
-    if(!horizontal){if(Math.abs(dx)<9&&Math.abs(dy)<9)return;if(Math.abs(dx)<=Math.abs(dy)*1.12){tracking=false;return;}horizontal=true;window.__f1SwipeActive=true;view.classList.add('swipe-dragging');}
+    if(!horizontal){if(Math.abs(dx)<6&&Math.abs(dy)<6)return;if(Math.abs(dx)<=Math.abs(dy)*1.04){tracking=false;return;}horizontal=true;window.__f1SwipeActive=true;view.classList.add('swipe-dragging');}
     e.preventDefault();target=swipeTarget(state.route,dx);const now=performance.now(),moveDt=Math.max(8,now-lastT);velocityX=(p.clientX-lastX)/moveDt;lastX=p.clientX;lastT=now;paint(dx,target);
   },{passive:false});
   window.addEventListener('touchend',e=>{
-    if(!tracking){if(horizontal)cancelSwipe();return;}const p=e.changedTouches?.[0],endX=p?.clientX??lastX,dx=endX-startX,dy=(p?.clientY??startY)-startY;
-    const width=Math.max(320,window.innerWidth),commit=target&&Math.abs(dx)>Math.abs(dy)*1.15&&(Math.abs(dx)>=Math.min(115,width*.24)||(Math.abs(dx)>=42&&Math.abs(velocityX)>.45));
-    if(commit)commitSwipe(target,dx);else cancelSwipe();
+    if(!tracking){if(horizontal)cancelSwipe();return;}
+    const p=e.changedTouches?.[0],endX=p?.clientX??lastX,endY=p?.clientY??startY,dx=endX-startX,dy=endY-startY;
+    const width=Math.max(320,window.innerWidth),quickTarget=target||swipeTarget(state.route,dx),velocityGuess=Math.abs(velocityX)||Math.abs(dx)/Math.max(1,performance.now()-lastT);
+    const mostlyHorizontal=Math.abs(dx)>Math.abs(dy)*1.02;
+    const commit=quickTarget&&mostlyHorizontal&&(Math.abs(dx)>=Math.min(88,width*.19)||(Math.abs(dx)>=28&&velocityGuess>.32));
+    if(commit)commitSwipe(quickTarget,dx);else cancelSwipe();
   },{passive:true});
   window.addEventListener('touchcancel',()=>{if(tracking||horizontal)cancelSwipe();},{passive:true});
 }
@@ -2022,8 +2124,15 @@ function updateLaunchContent(){
 }
 function showLaunchSequence(short=false){
   const el=document.getElementById('launch-screen');if(!el)return;updateLaunchContent();
-  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;el.classList.remove('hidden','leaving','short');if(short)el.classList.add('short');
-  clearTimeout(showLaunchSequence._timer);showLaunchSequence._timer=setTimeout(()=>{el.classList.add('leaving');setTimeout(()=>el.classList.add('hidden'),reduced?80:420);},reduced?220:(short?720:1250));
+  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  document.body.classList.add('launching');document.body.classList.remove('launch-revealing');
+  el.classList.remove('hidden','leaving','short');if(short)el.classList.add('short');
+  clearTimeout(showLaunchSequence._timer);clearTimeout(showLaunchSequence._hideTimer);
+  const displayMs=reduced?520:(short?1550:2350),hideMs=reduced?120:700;
+  showLaunchSequence._timer=setTimeout(()=>{
+    el.classList.add('leaving');document.body.classList.remove('launching');document.body.classList.add('launch-revealing');
+    showLaunchSequence._hideTimer=setTimeout(()=>{el.classList.add('hidden');document.body.classList.remove('launch-revealing');},hideMs);
+  },displayMs);
 }
 // Navigation / lifecycle
 window.setRoute=setRoute;

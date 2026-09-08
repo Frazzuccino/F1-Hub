@@ -25,7 +25,7 @@ test('freshness classifies stale records',()=>ok(Q.freshness(Date.now()-400000,6
 test('quality scoring weights categories',()=>ok(Q.overallQualityScore({data:9,reliability:9,performance:9,ux:9,features:9,pwa:9,accessibility:9,tests:9})===9),'tests');
 
 const app=fs.readFileSync(path.join(ROOT,'app.js'),'utf8'),html=fs.readFileSync(path.join(ROOT,'index.html'),'utf8'),css=fs.readFileSync(path.join(ROOT,'styles.css'),'utf8'),sw=fs.readFileSync(path.join(ROOT,'service-worker.js'),'utf8'),manifest=JSON.parse(fs.readFileSync(path.join(ROOT,'manifest.json'),'utf8'));
-test('release version is 1.15.0',()=>ok(app.includes("APP_VERSION = '1.15.0'")),'pwa');
+test('release version is 1.16.0',()=>ok(app.includes("APP_VERSION = '1.16.0'")),'pwa');
 test('quality core loads before app',()=>ok(html.indexOf('quality-core.js')<html.indexOf('app.js')),'reliability');
 test('car development core loads before app',()=>ok(html.indexOf('car-development-core.js')>0&&html.indexOf('car-development-core.js')<html.indexOf('app.js')),'reliability');
 test('driver career core loads before app',()=>ok(html.indexOf('driver-career-core.js')>0&&html.indexOf('driver-career-core.js')<html.indexOf('app.js')),'reliability');
@@ -94,8 +94,8 @@ test('car update UI has top and side schematic',()=>ok(app.includes('TOP VIEW')&
 test('car schematic discloses it is not CAD geometry',()=>ok(app.includes('not team CAD geometry')),'reliability');
 test('Car Development keeps explicit zero-update teams and parse warnings',()=>ok(app.includes('NO UPDATES SUBMITTED')&&app.includes('UPDATE TABLE COULD NOT BE SPLIT')&&app.includes('parseWarning')),'features');
 test('car markers link to update details',()=>ok(app.includes('focusCarUpdate')&&app.includes('update-flash')),'ux');
-test('service worker caches car-development core',()=>ok(sw.includes('car-development-core.js?v=1.15.0')),'performance');
-test('service worker caches driver-career core',()=>ok(sw.includes('driver-career-core.js?v=1.15.0')),'performance');
+test('service worker caches car-development core',()=>ok(sw.includes('car-development-core.js?v=1.16.0')),'performance');
+test('service worker caches driver-career core',()=>ok(sw.includes('driver-career-core.js?v=1.16.0')),'performance');
 // Motion quality: transitions only on navigation, not every background render.
 test('route motion helper exists',()=>ok(app.includes('function animateRouteContent')),'ux');
 test('render no longer replays view animation every refresh',()=>{const r=app.slice(app.indexOf('function render(){'),app.indexOf('function titleBlock'));ok(!r.includes("classList.add('view-enter')"));},'performance');
@@ -129,11 +129,11 @@ test('Race Calendar selection animates before opening race hub',()=>ok(app.inclu
 test('career pagination creates all required offsets',()=>eq(CAREER.pageOffsets(393,100),[0,100,200,300]),'data');
 test('career builder handles a 393-race archive without truncation',()=>{const rows=[];for(let i=0;i<393;i++){const pos=i<106?1:i<207?2:4;rows.push({season:String(2007+Math.floor(i/20)),round:String((i%20)+1),Results:[{position:String(pos),Constructor:{name:i<120?'McLaren':'Mercedes'}}]});}const c=CAREER.build(rows,393);ok(c.starts===393&&c.wins===106&&c.podiums===207&&c.complete);},'data');
 test('career UI labels full Grand Prix total rather than misleading 100-start sample',()=>ok(app.includes('<small>GRANDS PRIX</small>')&&app.includes('every paginated Jolpica/Ergast Grand Prix result')),'features');
-test('car drawing uses detailed stacked 2026-style geometry',()=>ok(app.includes('car-schematic-v2')&&app.includes('front-wing-element')&&app.includes('halo-shape')&&app.includes('suspension')&&app.includes('rear-wing-main')),'features');
-test('car schematic is tall enough to show top and side views clearly',()=>ok(app.includes('viewBox="0 0 1000 440"')),'ux');
+test('car drawing uses detailed stacked 2026-style geometry',()=>ok(app.includes('car-schematic-v2')&&app.includes('halo-shape')&&app.includes('suspension')&&app.includes('rear-wing-main')&&app.includes('grid-lines')),'features');
+test('car schematic is tall enough to show top and side views clearly',()=>ok(app.includes('viewBox="0 0 1000 470"')),'ux');
 test('car mapping coordinates were moved to the detailed schematic',()=>ok(CD.matchZone({component:'Rear Wing'}).top[0]>850&&CD.matchZone({component:'Front Wing'}).side[1]>300),'features');
-test('swipe uses direct finger translation rather than a 64px resisted nudge',()=>ok(app.includes('edge=tgt?Math.max(-width,Math.min(width,dx)):dx*.14')&&!app.includes('Math.max(-64,Math.min(64')),'ux');
-test('swipe commit uses distance and velocity thresholds',()=>ok(app.includes('Math.abs(velocityX)>.45')&&app.includes('width*.24')&&app.includes('velocityX=(p.clientX-lastX)/moveDt')),'ux');
+test('swipe uses direct finger translation rather than a 64px resisted nudge',()=>ok(app.includes('edge=tgt?Math.max(-width,Math.min(width,dx)):dx*.16')&&!app.includes('Math.max(-64,Math.min(64')),'ux');
+test('swipe commit uses distance and velocity thresholds',()=>ok(app.includes('velocityX=(p.clientX-lastX)/moveDt')&&app.includes('width*.19')&&app.includes('velocityGuess>.32')),'ux');
 test('swipe preview identifies destination section under the moving page',()=>ok(app.includes('SWIPE_META')&&css.includes('.swipe-preview.show')),'ux');
 test('launch overlay exists and is race-weekend aware',()=>ok(html.includes('id="launch-screen"')&&app.includes('function launchWeekendSummary')&&app.includes('NEXT · ROUND')),'features');
 test('launch sequence does not block background data refresh',()=>ok(app.indexOf('showLaunchSequence(false);')<app.lastIndexOf('loadBase();')),'performance');

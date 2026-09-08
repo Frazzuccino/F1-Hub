@@ -1,4 +1,4 @@
-# F1 Hub v1.15.0 — update / install
+# F1 Hub v1.16.0 — update / install
 
 ## Update GitHub Pages
 
@@ -8,9 +8,9 @@ Open the deployed app once with:
 
 `?v=1150`
 
-In **More**, the footer should show **F1 Hub v1.15.0**.
+In **More**, the footer should show **F1 Hub v1.16.0**.
 
-## Main changes in v1.15.0
+## Main changes in v1.16.0
 
 - Replaced the previous abstract Car Development drawing with a much more detailed top/side 2026-style F1 car schematic.
 - Remapped technical update markers to the new car geometry.

@@ -22,7 +22,7 @@ const JINA = 'https://r.jina.ai/';
 const MOTORSPORT_STANDINGS = `https://www.motorsport.com/f1/standings/${YEAR}/`;
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const APP_VERSION = '1.11.9';
+const APP_VERSION = '1.11.10';
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -125,7 +125,20 @@ function hydrateBaseFromCache(){
     const ds=cacheGet('drivers');
     const cs=cacheGet('constructors');
     const of1=cacheGet('photos');
-    const news=cacheGet('news-combined');
+    let news=cacheGet('news-combined');
+    // Migration/fallback for older builds that cached news per publisher rather than as one combined list.
+    if(!Array.isArray(news)||!news.length){
+      const legacy=[];
+      for(const src of NEWS_SOURCES){
+        const a=cacheGet('news-'+src.id);if(Array.isArray(a))legacy.push(...a);
+        const b=cacheGet('news-rss2json-'+src.id);if(Array.isArray(b))legacy.push(...b);
+      }
+      if(legacy.length){
+        const seen=new Set();
+        news=legacy.sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0)).filter(n=>{const k=String(n.link||n.title||'').replace(/\?.*$/,'').toLowerCase();if(!k||seen.has(k))return false;seen.add(k);return true;}).slice(0,80);
+        cachePut('news-combined',news);
+      }
+    }
     if(sched)state.schedule=sched?.MRData?.RaceTable?.Races||state.schedule;
     if(ds){const table=ds?.MRData?.StandingsTable||{};const rows=table.StandingsLists?.[0]?.DriverStandings||[];if(rows.length){state.drivers=rows;state.driverStandingsRound=Number(table.round||0);}}
     if(cs){const table=cs?.MRData?.StandingsTable||{};const rows=table.StandingsLists?.[0]?.ConstructorStandings||[];if(rows.length){state.constructors=rows;state.constructorStandingsRound=Number(table.round||0);}}
@@ -366,7 +379,8 @@ async function loadBase(force=false){
 
   // News is intentionally non-blocking during normal startup. It can involve many publisher/proxy
   // requests, so waiting for it here made the whole PWA feel slow even when cached app data existed.
-  const newsTask=loadNewsSources(force).then(()=>{if(state.route==='news')renderNews();}).catch(()=>{});
+  state.newsRefreshing=true;
+  const newsTask=loadNewsSources(force).catch(()=>{}).finally(()=>{state.newsRefreshing=false;if(state.route==='news')renderNews();});
   let standingsTask=Promise.resolve();
   let wikiTask=Promise.resolve();
 
@@ -581,7 +595,7 @@ function parseReprimands(text){
 }
 
 function parentNav(route){ if(route==='home'||route==='races'||route==='standings'||route==='news'||route==='more')return route; if(route.startsWith('race:')||route.startsWith('session:')||route.startsWith('telemetry:')||route.startsWith('carupdates:')||route.startsWith('circuit:')||route.startsWith('radar:'))return 'races'; return 'more'; }
-function setRoute(route,push=true){ if(!route)return; state.route=route; if(push && location.hash!==`#${encodeURIComponent(route)}`)history.pushState({route},'',`#${encodeURIComponent(route)}`); window.scrollTo({top:0,behavior:'instant'}); const parent=parentNav(route);document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',parent===b.dataset.route)); render(); }
+function setRoute(route,push=true){ if(!route)return; state.route=route; if(push && location.hash!==`#${encodeURIComponent(route)}`)history.pushState({route},'',`#${encodeURIComponent(route)}`); window.scrollTo({top:0,behavior:'instant'}); const parent=parentNav(route);document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',parent===b.dataset.route)); render(); if(route==='news'&&!state.news.length&&!state.newsRefreshing)setTimeout(()=>refreshNewsOnly(true),0); }
 function render(){
   clearInterval(state.countdownTimer);clearInterval(state.radarTimer);state.radarTimer=null;
   view.classList.remove('view-enter');
@@ -702,7 +716,7 @@ function renderNews(){
   const newest=newestTimes.length?Math.max(...newestTimes):0;
   const freshness=newest?`<div class="news-freshness">LATEST ARTICLE · ${esc(fmtNewsTime(new Date(newest).toISOString()))} AGO</div>`:'';
   const reveal=spoilerActive()?`<div class="card spoiler-settings"><div><div class="eyebrow">SPOILER MODE</div><div class="card-title">Reveal headlines</div><div class="muted">Turn this on if you want headlines visible during this race weekend. You can switch them off again at any time.</div></div>${headlineToggleHtml()}</div><div class="spacer"></div>`:'';
-  const cards=filtered.length?filtered.map(n=>guard?`<div class="card news-card spoiler-news-card"><div class="news-body"><div class="news-title">SPOILER HIDDEN</div><div class="news-meta">${esc((n.source||'F1').toUpperCase())} · ${fmtNewsTime(n.pubDate)}</div></div></div>`:`<a class="card news-card news-link" href="${esc(n.link)}" target="_blank" rel="noopener">${n.thumbnail?`<img class="news-img" src="${esc(n.thumbnail)}" alt="" loading="lazy">`:''}<div class="news-body"><div class="news-title">${esc(n.title)}</div><div class="news-meta">${esc((n.source||'F1').toUpperCase())} · ${fmtNewsTime(n.pubDate)}</div></div></a>`).join(''):'<div class="empty">No stories from this source right now.</div>';
+  const cards=filtered.length?filtered.map(n=>guard?`<div class="card news-card spoiler-news-card"><div class="news-body"><div class="news-title">SPOILER HIDDEN</div><div class="news-meta">${esc((n.source||'F1').toUpperCase())} · ${fmtNewsTime(n.pubDate)}</div></div></div>`:`<a class="card news-card news-link" href="${esc(n.link)}" target="_blank" rel="noopener">${n.thumbnail?`<img class="news-img" src="${esc(n.thumbnail)}" alt="" loading="lazy">`:''}<div class="news-body"><div class="news-title">${esc(n.title)}</div><div class="news-meta">${esc((n.source||'F1').toUpperCase())} · ${fmtNewsTime(n.pubDate)}</div></div></a>`).join(''):(state.newsRefreshing?'<div class="empty">Loading latest stories…</div>':state.newsSource==='ALL'?'<div class="empty">News could not be loaded. <button class="external-btn" onclick="refreshNewsOnly(true)">TRY AGAIN</button></div>':'<div class="empty">No stories from this source right now.</div>');
   view.innerHTML=titleBlock('MULTI-SOURCE','Latest News',spoilerPill())+tabs+freshness+reveal+`<div class="grid news-grid">${cards}</div>`;
   document.querySelectorAll('[data-news-source]').forEach(b=>b.onclick=()=>{state.newsSource=b.dataset.newsSource;renderNews();});
 }
@@ -1647,6 +1661,7 @@ function setupPullToRefresh(){
 
 // Navigation / lifecycle
 window.setRoute=setRoute;
+window.refreshNewsOnly=refreshNewsOnly;
 state.route=decodeURIComponent(location.hash.slice(1)||'home');
 function isAppInstalled(){return isStandalone()||state.justInstalled;}
 document.body.classList.toggle('standalone',isStandalone());

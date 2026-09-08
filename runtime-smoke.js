@@ -1,8 +1,9 @@
 'use strict';
 const fs=require('fs'),vm=require('vm'),path=require('path');
 global.F1HubQuality=require('../quality-core.js');
+global.F1HubCarDevelopment=require('../car-development-core.js');
 const dummy=()=>({
-  textContent:'',className:'',innerHTML:'',dataset:{},style:{},classList:{add(){},remove(){},toggle(){},contains(){return false}},
+  textContent:'',className:'',innerHTML:'',dataset:{},style:{setProperty(){},removeProperty(){}},classList:{add(){},remove(){},toggle(){},contains(){return false}},
   addEventListener(){},removeEventListener(){},querySelector(){return null},querySelectorAll(){return []},closest(){return null},appendChild(){},remove(){},setAttribute(){},hasAttribute(){return false},
   get value(){return this._value||''},set value(v){this._value=v},options:[],disabled:false
 });
@@ -25,5 +26,11 @@ try{
   const sorted=vm.runInThisContext("sortedSessionResults([{driver_number:18,dnf:true,position:null,number_of_laps:20},{driver_number:12,position:1,number_of_laps:53},{driver_number:63,position:2,number_of_laps:53}]).map(x=>x.driver_number)");
   if(JSON.stringify(sorted)!=='[12,63,18]')throw new Error('runtime DNF ordering failed: '+JSON.stringify(sorted));
   const route=vm.runInThisContext("parentNav('datahealth')");if(route!=='more')throw new Error('data health nav route failed');
+  const parsed=vm.runInThisContext("parseCarPresentation('Mercedes\\n| 1 | Front Wing | Circuit specific | Revised flap | Lower drag |\\nWilliams\\n| 1 | Floor Edge | Performance | Re-profiled edge | More load |')");
+  if(parsed.teams.length!==2||parsed.teams[0].updates[0].component!=='Front Wing')throw new Error('FIA update parser fixture failed');
+  const none=vm.runInThisContext("parseCarPresentation('Aston Martin Aramco F1 Team\\nNo updates submitted for this event.')");if(none.teams.length!==1||!none.teams[0].noUpdates)throw new Error('FIA no-update team parser failed');
+  const carHtml=vm.runInThisContext("carUpdatesHtml(parseCarPresentation('Mercedes\\n| 1 | Front Wing | Circuit specific | Revised flap | Lower drag |'),{url:'https://fia.example/doc.pdf'})");
+  if(!carHtml.includes('TOP VIEW')||!carHtml.includes('Front wing'))throw new Error('car schematic render failed');
+  const theme=vm.runInThisContext("(()=>{state.favouriteTeam='McLaren';state.personalTheme=true;applyPersonalTheme();return favouriteTeamName();})()");if(theme!=='McLaren')throw new Error('My F1 theme runtime failed');
   console.log('RUNTIME SMOKE: PASS');
 }catch(e){console.error('RUNTIME SMOKE: FAIL',e.stack||e);process.exit(1);}

@@ -22,8 +22,9 @@ const JINA = 'https://r.jina.ai/';
 const MOTORSPORT_STANDINGS = `https://www.motorsport.com/f1/standings/${YEAR}/`;
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const APP_VERSION = '1.12.0';
+const APP_VERSION = '1.13.0';
 const Q = globalThis.F1HubQuality;
+const CD = globalThis.F1HubCarDevelopment;
 const STATIC_DRIVER_PHOTOS = {
   lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
 };
@@ -89,13 +90,44 @@ const state = {
   route:'home', schedule:[], drivers:[], constructors:[], photos:{}, wikiPhotos:{}, news:[], newsSource:'ALL', spoilerNewsRevealedRound:null, standingsSpoilerRevealedRound:null,
   penaltyPoints:{...FALLBACK_POINTS}, reprimands:{...FALLBACK_REPRIMANDS}, stewardDocs:{}, historyYear:YEAR-1, historyCache:{}, carUpdateDocs:{},
   loaded:false, refreshing:false, newsRefreshing:false, newsUpdatedAt:0, newsLatestArticleAt:0, standingsRefreshing:false, standingsUpdatedAt:0, driverStandingsRound:0, constructorStandingsRound:0, standingsDerivedRound:0, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null,
-  dataHealth:{}, favouriteDriver:localStorage.getItem('f1hub:favourite-driver')||'', favouriteTeam:localStorage.getItem('f1hub:favourite-team')||'', lastRaceInsights:{}, updateAvailable:false
+  dataHealth:{}, favouriteDriver:localStorage.getItem('f1hub:favourite-driver')||'', favouriteTeam:localStorage.getItem('f1hub:favourite-team')||'', personalTheme:localStorage.getItem('f1hub:personal-theme')!=='off', lastRaceInsights:{}, updateAvailable:false, routeMotionPending:true
 };
 const view = document.getElementById('view');
 
 function esc(v=''){ return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 function teamColour(name){ return TEAM_COLOURS[name] || '#777'; }
+function shadeHex(hex,factor=.48){
+  const m=String(hex||'').match(/^#([0-9a-f]{6})$/i);if(!m)return '#651616';
+  const n=parseInt(m[1],16),r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  const f=Math.max(0,Math.min(1,factor));return '#'+[r,g,b].map(v=>Math.round(v*f).toString(16).padStart(2,'0')).join('');
+}
+function favouriteTeamName(){
+  if(state.favouriteTeam)return state.favouriteTeam;
+  const s=favouriteDriverStanding();return s?.Constructors?.at(-1)?.name||'';
+}
+function applyPersonalTheme(){
+  const team=state.personalTheme?favouriteTeamName():'';
+  const accent=team&&teamColour(team)!=='#777'?teamColour(team):'#ff1e1e';
+  document.documentElement.style.setProperty('--red',accent);
+  document.documentElement.style.setProperty('--red2',shadeHex(accent,.5));
+  document.documentElement.style.setProperty('--theme-soft',shadeHex(accent,.23));
+  document.body.classList.toggle('personal-theme',!!team);
+  document.body.dataset.themeTeam=team||'default';
+  const meta=document.querySelector('meta[name="theme-color"]');if(meta)meta.setAttribute('content','#090909');
+}
+function isFavouriteDriver(s){return !!s&&s.Driver?.driverId===state.favouriteDriver;}
+function isFavouriteTeamName(team){return !!team&&team===favouriteTeamName();}
+function favouriteTeamStanding(){const name=favouriteTeamName();return state.constructors.find(c=>c.Constructor?.name===name)||null;}
+function myF1Terms(){
+  const out=[];const s=favouriteDriverStanding(),team=favouriteTeamName();
+  if(s){out.push(fullName(s.Driver),s.Driver.familyName);}
+  if(team)out.push(team,team.replace(/ F1 Team$/i,''),team.replace(/ Racing$/i,''));
+  return [...new Set(out.map(x=>String(x||'').trim().toLowerCase()).filter(x=>x.length>2))];
+}
+function myF1News(){const terms=myF1Terms();return terms.length?state.news.filter(n=>{const hay=`${n.title||''} ${n.description||''}`.toLowerCase();return terms.some(t=>hay.includes(t));}):[];}
+function openMyF1News(){state.newsSource='MYF1';setRoute('news');}
+window.openMyF1News=openMyF1News;
 function fullName(d){ return [d?.givenName,d?.familyName].filter(Boolean).join(' '); }
 function driverCode(d){ return d?.code || d?.familyName?.slice(0,3).toUpperCase() || '---'; }
 function flag(country){
@@ -120,11 +152,26 @@ function currentDataHealthScore(){const vals=Object.values(state.dataHealth);if(
 function saveFavourite(kind,value){if(kind==='driver'){state.favouriteDriver=value;localStorage.setItem('f1hub:favourite-driver',value||'');}else{state.favouriteTeam=value;localStorage.setItem('f1hub:favourite-team',value||'');}render();toast('Preferences saved');}
 function favouriteDriverStanding(){return state.drivers.find(s=>s.Driver.driverId===state.favouriteDriver)||null;}
 function favouriteCard(){
-  const s=favouriteDriverStanding();
-  if(!s)return `<div class="card favourite-card"><div class="eyebrow">MY F1</div><div class="card-title">Choose a favourite driver</div><div class="muted">Pin your driver and team to Home for instant championship context.</div><div class="spacer"></div><button class="external-btn" onclick="setRoute('preferences')">SET FAVOURITES</button></div>`;
-  const leader=state.drivers[0],gap=Math.max(0,Number(leader?.points||0)-Number(s.points||0)),team=s.Constructors?.at(-1)?.name||'';
-  return `<div class="card favourite-card" style="border-left:5px solid ${teamColour(team)}"><div class="eyebrow">MY F1 · ${esc(driverCode(s.Driver))}</div><div class="favourite-head"><div><div class="card-title">${esc(fullName(s.Driver))}</div><div class="muted">${esc(team)} · P${esc(s.position)} · ${esc(s.points)} pts</div></div><b class="favourite-pos">P${esc(s.position)}</b></div><div class="favourite-gap">${Number(s.position)===1?'Championship leader':`${gap} pts from championship lead`}</div><div class="spacer"></div><div class="actions"><button class="external-btn" onclick="setRoute('driver:${esc(s.Driver.driverId)}')">DRIVER PROFILE</button><button class="external-btn" onclick="setRoute('preferences')">CHANGE</button></div></div>`;
+  const s=favouriteDriverStanding(),teamName=favouriteTeamName(),teamStanding=favouriteTeamStanding();
+  if(!s&&!teamStanding)return `<div class="card favourite-card"><div class="eyebrow">MY F1</div><div class="card-title">Make F1 Hub yours</div><div class="muted">Choose a favourite driver and team to theme the app, highlight standings and unlock a personalised news filter.</div><div class="spacer"></div><button class="external-btn red" onclick="setRoute('preferences')">SET UP MY F1</button></div>`;
+  const leader=state.drivers[0],gap=s?Math.max(0,Number(leader?.points||0)-Number(s.points||0)):0;
+  const driverTeam=s?.Constructors?.at(-1)?.name||teamName;
+  const mate=s?state.drivers.find(x=>x.Driver.driverId!==s.Driver.driverId&&(x.Constructors?.at(-1)?.name||'')===driverTeam):null;
+  const mateGap=s&&mate?Number(s.points||0)-Number(mate.points||0):null;
+  const myNews=myF1News()[0];
+  return `<div class="card favourite-card my-f1-card" style="--team-accent:${teamColour(teamName||driverTeam)};border-left:5px solid var(--team-accent)">
+    <div class="my-f1-top"><div><div class="eyebrow">MY F1${teamName?` · ${esc(teamName)}`:''}</div><div class="card-title">${s?esc(fullName(s.Driver)):esc(teamName)}</div></div><button class="mini-btn" onclick="setRoute('preferences')" aria-label="Change My F1 preferences">⚙</button></div>
+    <div class="my-f1-grid">
+      ${s?`<div><small>DRIVER</small><b>P${esc(s.position)} · ${esc(s.points)} pts</b><span>${Number(s.position)===1?'Championship leader':`${gap} pts off lead`}</span></div>`:''}
+      ${teamStanding?`<div><small>TEAM</small><b>P${esc(teamStanding.position)} · ${esc(teamStanding.points)} pts</b><span>${esc(teamStanding.wins)} wins</span></div>`:''}
+      ${mate?`<div><small>TEAM-MATE</small><b>${mateGap>=0?'+':''}${mateGap} pts</b><span>vs ${esc(mate.Driver.familyName)}</span></div>`:''}
+      <div><small>THEME</small><b>${state.personalTheme&&teamName?'ON':'OFF'}</b><span>${state.personalTheme&&teamName?esc(teamName):'F1 red'}</span></div>
+    </div>
+    ${myNews?`<button class="my-f1-news" onclick="openMyF1News()"><small>LATEST MY F1 STORY</small><b>${esc(myNews.title)}</b><span>${esc((myNews.source||'F1').toUpperCase())} · ${fmtNewsTime(myNews.pubDate)}</span></button>`:''}
+    <div class="spacer"></div><div class="actions">${s?`<button class="external-btn" onclick="setRoute('driver:${esc(s.Driver.driverId)}')">DRIVER PROFILE</button>`:''}<button class="external-btn" onclick="openMyF1News()">MY F1 NEWS</button></div>
+  </div>`;
 }
+
 function freshnessStrip(){
   const items=[['Schedule',state.dataHealth.schedule],['Standings',state.dataHealth.standings],['News',state.dataHealth.news]];
   return `<button class="freshness-strip" onclick="setRoute('datahealth')" aria-label="Open data health">${items.map(([n,r])=>`<span class="health-${healthState(r)}"><b>${healthIcon(r)}</b>${esc(n)}</span>`).join('')}<small>DATA HEALTH ›</small></button>`;
@@ -163,7 +210,7 @@ function hydrateBaseFromCache(){
     if(state.drivers.length&&state.constructors.length)markHealth('standings','ok','Jolpica cache',Math.max(cacheStamp('drivers'),cacheStamp('constructors')),'Cached championship table',Math.min(state.driverStandingsRound,state.constructorStandingsRound),30*60e3);
     if(state.news.length)markHealth('news','ok','News cache',cacheStamp('news-combined'),'Cached multi-source headlines',0,20*60e3);
     state.loaded=state.schedule.length>0||state.drivers.length>0;
-    if(state.loaded){state.dataStamp=new Date();render();}
+    if(state.loaded){state.dataStamp=new Date();render();if(state.routeMotionPending){state.routeMotionPending=false;requestAnimationFrame(animateRouteContent);}}
     return state.loaded;
   }catch{return false;}
 }
@@ -431,7 +478,9 @@ async function loadBase(force=false){
 
     state.loaded=state.schedule.length>0||state.drivers.length>0;
     state.dataStamp=new Date();
+    applyPersonalTheme();
     render();
+    if(state.routeMotionPending){state.routeMotionPending=false;requestAnimationFrame(animateRouteContent);}
 
     standingsTask=refreshPostRaceStandings().then(()=>{if(['standings','home','drivers','teams'].includes(state.route))render();}).catch(()=>{});
     wikiTask=loadWikipediaPhotos(force).then(()=>{if(state.route==='drivers'||state.route.startsWith('driver:'))render();}).catch(()=>{});
@@ -634,12 +683,16 @@ function parseReprimands(text){
 }
 
 function parentNav(route){ if(route==='home'||route==='races'||route==='standings'||route==='news'||route==='more')return route; if(route.startsWith('race:')||route.startsWith('session:')||route.startsWith('telemetry:')||route.startsWith('carupdates:')||route.startsWith('circuit:')||route.startsWith('radar:'))return 'races'; return 'more'; }
-function setRoute(route,push=true){ if(!route)return; state.route=route; if(push && location.hash!==`#${encodeURIComponent(route)}`)history.pushState({route},'',`#${encodeURIComponent(route)}`); window.scrollTo({top:0,behavior:'instant'}); const parent=parentNav(route);document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',parent===b.dataset.route)); render(); if(route==='news'&&!state.news.length&&!state.newsRefreshing)setTimeout(()=>refreshNewsOnly(true),0); }
+function animateRouteContent(){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  view.classList.remove('route-enter');void view.offsetWidth;view.classList.add('route-enter');
+  const els=[...view.querySelectorAll('.card,.session-row,.race-card,.menu-card,.driver-card')].slice(0,16);
+  els.forEach((el,i)=>{el.classList.remove('stagger-enter');el.style.setProperty('--stagger',`${Math.min(i,10)*24}ms`);void el.offsetWidth;el.classList.add('stagger-enter');});
+  setTimeout(()=>{view.classList.remove('route-enter');els.forEach(el=>el.classList.remove('stagger-enter'));},650);
+}
+function setRoute(route,push=true){ if(!route)return; const changed=route!==state.route;state.route=route; if(push && location.hash!==`#${encodeURIComponent(route)}`)history.pushState({route},'',`#${encodeURIComponent(route)}`); window.scrollTo({top:0,behavior:'instant'}); const parent=parentNav(route);document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',parent===b.dataset.route)); render(); if(changed)requestAnimationFrame(animateRouteContent); if(route==='news'&&!state.news.length&&!state.newsRefreshing)setTimeout(()=>refreshNewsOnly(true),0); }
 function render(){
   clearInterval(state.countdownTimer);clearInterval(state.radarTimer);state.radarTimer=null;
-  view.classList.remove('view-enter');
-  void view.offsetWidth;
-  view.classList.add('view-enter');
   if(!state.loaded){view.innerHTML='<div class="loader">Loading F1 Hub…</div>';return;}
   const r=state.route;
   if(r==='home')return renderHome(); if(r==='races')return renderRaces(); if(r==='standings')return renderStandings(); if(r==='news')return renderNews(); if(r==='more')return renderMore();
@@ -664,7 +717,7 @@ function spoilerSettingsCard(){
 function countdownHtml(iso){ return `<div class="countdown" data-countdown="${esc(iso)}"><div class="count-cell"><b data-c="d">00</b><small>DAYS</small></div><div class="count-cell"><b data-c="h">00</b><small>HOURS</small></div><div class="count-cell"><b data-c="m">00</b><small>MIN</small></div><div class="count-cell"><b data-c="s">00</b><small>SEC</small></div></div>`; }
 function startCountdown(){ const el=document.querySelector('[data-countdown]'); if(!el)return; const tick=()=>{let d=Math.max(0,new Date(el.dataset.countdown)-new Date()),days=Math.floor(d/864e5);d%=864e5;let h=Math.floor(d/36e5);d%=36e5;let m=Math.floor(d/6e4);let s=Math.floor((d%6e4)/1000);[['d',days],['h',h],['m',m],['s',s]].forEach(([k,v])=>{const x=el.querySelector(`[data-c="${k}"]`);if(x)x.textContent=String(v).padStart(2,'0');});};tick();state.countdownTimer=setInterval(tick,1000); }
 function standingsMini(){ return state.drivers.slice(0,3).map(s=>standingRow(s)).join(''); }
-function standingRow(s){ const team=s.Constructors?.at(-1)?.name||'';return `<div class="standing-row"><div class="pos">${esc(s.position)}</div><div class="driver-line"><i class="team-dot" style="background:${teamColour(team)}"></i><div><div class="driver-name">${esc(driverCode(s.Driver))} · ${esc(s.Driver.familyName)}</div><div class="driver-meta">${esc(team)} · ${esc(s.wins)} wins</div></div></div><div class="points">${esc(s.points)}<small>PTS</small></div></div>`; }
+function standingRow(s){ const team=s.Constructors?.at(-1)?.name||'',fav=isFavouriteDriver(s)||isFavouriteTeamName(team);return `<div class="standing-row ${fav?'is-favourite':''}"><div class="pos">${esc(s.position)}</div><div class="driver-line"><i class="team-dot" style="background:${teamColour(team)}"></i><div><div class="driver-name">${fav?'★ ':''}${esc(driverCode(s.Driver))} · ${esc(s.Driver.familyName)}</div><div class="driver-meta">${esc(team)} · ${esc(s.wins)} wins</div></div></div><div class="points">${esc(s.points)}<small>PTS</small></div></div>`; }
 function sessionRows(r){
   const ns=nextSession(r);
   return sessions(r).map(s=>{
@@ -685,8 +738,6 @@ function renderHome(){
       <h1>${esc(r.raceName.toUpperCase())}</h1><div class="circuit">${esc(r.Circuit.circuitName)} · ${esc(r.Circuit.Location.locality)}</div>
       ${ns?`<div class="next-session"><div class="label">NEXT SESSION</div><div class="name">${esc(ns.name)}</div><div class="time">${fmtDateTime(ns.iso)} · UK</div></div>${countdownHtml(ns.iso)}`:`<div class="next-session"><div class="name">Race weekend complete</div></div>`}
     </section>
-    ${freshnessStrip()}
-    <div class="spacer"></div>
     ${favouriteCard()}
     <div class="spacer"></div>
     <div class="grid desktop-two"><div>
@@ -745,16 +796,16 @@ function renderStandings(){
   const latest=latestCompletedRace(),latestRound=Number(latest?.round||0),behind=latestRound>Math.min(Number(state.driverStandingsRound||0),Number(state.constructorStandingsRound||0));
   const syncNote=state.standingsDerivedRound===latestRound&&latestRound?`<div class="source-note good-note">✓ VALIDATED POST-RACE TABLE · Rebuilt from the previous official standings plus the published Round ${latestRound} points while the primary feed catches up.</div>`:`<div class="source-note">STANDINGS · ${esc(healthLabel(state.dataHealth.standings))}</div>`;
   view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Standings',spoilerPill())+`<div class="tabs"><button class="tab active" data-stand="drivers">DRIVERS</button><button class="tab" data-stand="constructors">CONSTRUCTORS</button></div><div id="stand-list" class="card">${state.drivers.map(standingRow).join('')}</div>${syncNote}`;
-  document.querySelectorAll('[data-stand]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-stand]').forEach(x=>x.classList.remove('active'));b.classList.add('active');const el=document.getElementById('stand-list');el.innerHTML=b.dataset.stand==='drivers'?state.drivers.map(standingRow).join(''):state.constructors.map(c=>`<div class="standing-row"><div class="pos">${esc(c.position)}</div><div class="driver-line"><i class="team-dot" style="background:${teamColour(c.Constructor.name)}"></i><div><div class="driver-name">${esc(c.Constructor.name)}</div><div class="driver-meta">${esc(c.wins)} wins</div></div></div><div class="points">${esc(c.points)}<small>PTS</small></div></div>`).join('');});
+  document.querySelectorAll('[data-stand]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-stand]').forEach(x=>x.classList.remove('active'));b.classList.add('active');const el=document.getElementById('stand-list');el.innerHTML=b.dataset.stand==='drivers'?state.drivers.map(standingRow).join(''):state.constructors.map(c=>`<div class="standing-row ${isFavouriteTeamName(c.Constructor.name)?'is-favourite':''}"><div class="pos">${esc(c.position)}</div><div class="driver-line"><i class="team-dot" style="background:${teamColour(c.Constructor.name)}"></i><div><div class="driver-name">${isFavouriteTeamName(c.Constructor.name)?'★ ':''}${esc(c.Constructor.name)}</div><div class="driver-meta">${esc(c.wins)} wins</div></div></div><div class="points">${esc(c.points)}<small>PTS</small></div></div>`).join('');});
   if(behind&&!state.standingsRefreshing&&Date.now()-(state.standingsUpdatedAt||0)>2*60e3)refreshChampionshipOnly();
 }
 function fmtNewsTime(d){ if(!d)return ''; const x=new Date(d),mins=Math.round((Date.now()-x)/60000);if(mins<60)return `${Math.max(1,mins)}m`;if(mins<1440)return `${Math.floor(mins/60)}h`;return fmtDate(x.toISOString()); }
 function renderNews(){
   const guard=spoilerActive()&&!newsSpoilersRevealed();
-  const sourceIds=['ALL',...NEWS_SOURCES.map(x=>x.id)];
+  const sourceIds=['ALL',...(myF1Terms().length?['MYF1']:[]),...NEWS_SOURCES.map(x=>x.id)];
   if(!sourceIds.includes(state.newsSource))state.newsSource='ALL';
-  const filtered=state.newsSource==='ALL'?state.news:state.news.filter(n=>n.sourceId===state.newsSource);
-  const tabs=`<div class="news-source-tabs">${sourceIds.map(id=>{const x=NEWS_SOURCES.find(s=>s.id===id);return `<button class="tab ${state.newsSource===id?'active':''}" data-news-source="${id}">${id==='ALL'?'ALL':esc(x?.name||id)}</button>`;}).join('')}</div>`;
+  const filtered=state.newsSource==='ALL'?state.news:state.newsSource==='MYF1'?myF1News():state.news.filter(n=>n.sourceId===state.newsSource);
+  const tabs=`<div class="news-source-tabs">${sourceIds.map(id=>{const x=NEWS_SOURCES.find(s=>s.id===id);return `<button class="tab ${state.newsSource===id?'active':''}" data-news-source="${id}">${id==='ALL'?'ALL':id==='MYF1'?'★ MY F1':esc(x?.name||id)}</button>`;}).join('')}</div>`;
   const newestTimes=filtered.map(n=>new Date(n.pubDate||0).getTime()).filter(Number.isFinite);
   const newest=newestTimes.length?Math.max(...newestTimes):0;
   const freshness=newest?`<div class="news-freshness">LATEST ARTICLE · ${esc(fmtNewsTime(new Date(newest).toISOString()))} AGO</div>`:'';
@@ -777,10 +828,15 @@ function renderPreferences(){
   const driverOpts=['<option value="">No favourite driver</option>',...state.drivers.map(s=>`<option value="${esc(s.Driver.driverId)}" ${state.favouriteDriver===s.Driver.driverId?'selected':''}>${esc(fullName(s.Driver))} · ${esc(s.Constructors?.at(-1)?.name||'')}</option>`)].join('');
   const teams=[...new Set(state.constructors.map(c=>c.Constructor?.name).filter(Boolean))];
   const teamOpts=['<option value="">No favourite team</option>',...teams.map(t=>`<option value="${esc(t)}" ${state.favouriteTeam===t?'selected':''}>${esc(t)}</option>`)].join('');
-  const r=currentRace();
-  view.innerHTML=titleBlock('PERSONALISE','My F1')+`<div class="card preferences-card"><label><div class="eyebrow">FAVOURITE DRIVER</div><select id="fav-driver">${driverOpts}</select></label><label><div class="eyebrow">FAVOURITE TEAM</div><select id="fav-team">${teamOpts}</select></label><div class="spacer"></div><button id="save-favourites" class="external-btn red">SAVE MY F1</button></div>${r?`<div class="spacer"></div><div class="card"><div class="eyebrow">RACE-WEEKEND SHORTCUT</div><div class="card-title">Add ${esc(r.raceName)} to your calendar</div><div class="muted">Creates one .ics file containing every session in the weekend.</div><div class="spacer"></div><button class="external-btn" onclick="addRaceWeekendCalendar('${esc(r.round)}')">ADD WEEKEND TO CALENDAR</button></div>`:''}<div class="spacer"></div>${spoilerSettingsCard()}`;
-  document.getElementById('save-favourites').onclick=()=>{const d=document.getElementById('fav-driver').value,t=document.getElementById('fav-team').value;state.favouriteDriver=d;state.favouriteTeam=t;localStorage.setItem('f1hub:favourite-driver',d);localStorage.setItem('f1hub:favourite-team',t);toast('My F1 saved');renderPreferences();};
+  const r=currentRace(),activeTeam=favouriteTeamName();
+  view.innerHTML=titleBlock('PERSONALISE','My F1')+`<div class="card preferences-card"><label><div class="eyebrow">FAVOURITE DRIVER</div><select id="fav-driver">${driverOpts}</select></label><label><div class="eyebrow">FAVOURITE TEAM</div><select id="fav-team">${teamOpts}</select></label><label class="theme-choice"><span><div class="eyebrow">PERSONAL THEME</div><b>Use my team colours throughout F1 Hub</b><small>Changes accents, highlights your favourites in standings and keeps status colours meaningful.</small></span><input id="fav-theme" type="checkbox" ${state.personalTheme?'checked':''} aria-label="Use favourite team theme"></label><div class="theme-preview" style="--preview:${teamColour(activeTeam)}"><i></i><span>${activeTeam?`${esc(activeTeam)} theme`:'Choose a team or driver to preview a theme'}</span></div><div class="spacer"></div><button id="save-favourites" class="external-btn red">SAVE MY F1</button></div>
+  <div class="spacer"></div><div class="card my-f1-benefits"><div class="eyebrow">WHAT MY F1 CHANGES</div><div class="benefit-grid"><div><b>★ Standings</b><span>Your driver and team are highlighted.</span></div><div><b>◫ News</b><span>A MY F1 tab filters stories about them.</span></div><div><b>🛠 Development</b><span>Your team is surfaced first in car updates.</span></div><div><b>⌂ Home</b><span>Driver, team and team-mate context in one card.</span></div></div></div>
+  ${r?`<div class="spacer"></div><div class="card"><div class="eyebrow">RACE-WEEKEND SHORTCUT</div><div class="card-title">Add ${esc(r.raceName)} to your calendar</div><div class="muted">Creates one .ics file containing every session in the weekend.</div><div class="spacer"></div><button class="external-btn" onclick="addRaceWeekendCalendar('${esc(r.round)}')">ADD WEEKEND TO CALENDAR</button></div>`:''}<div class="spacer"></div>${spoilerSettingsCard()}`;
+  const preview=()=>{const team=document.getElementById('fav-team').value||state.drivers.find(x=>x.Driver.driverId===document.getElementById('fav-driver').value)?.Constructors?.at(-1)?.name||'';const el=document.querySelector('.theme-preview');if(el){el.style.setProperty('--preview',teamColour(team));el.querySelector('span').textContent=team?`${team} theme`:'Choose a team or driver to preview a theme';}};
+  document.getElementById('fav-driver').addEventListener('change',preview);document.getElementById('fav-team').addEventListener('change',preview);
+  document.getElementById('save-favourites').onclick=()=>{const d=document.getElementById('fav-driver').value,t=document.getElementById('fav-team').value,theme=document.getElementById('fav-theme').checked;state.favouriteDriver=d;state.favouriteTeam=t;state.personalTheme=theme;localStorage.setItem('f1hub:favourite-driver',d);localStorage.setItem('f1hub:favourite-team',t);localStorage.setItem('f1hub:personal-theme',theme?'on':'off');applyPersonalTheme();toast('My F1 saved');renderPreferences();};
 }
+
 function renderDataHealth(){
   const rows=['schedule','standings','news','photos'].map(k=>{const r=state.dataHealth[k],st=healthState(r);return `<div class="health-row"><span class="health-dot health-${st}">${healthIcon(r)}</span><div><b>${esc(k.toUpperCase())}</b><small>${esc(healthLabel(r))}</small>${r?.detail?`<em>${esc(r.detail)}</em>`:''}</div><span class="health-state">${esc(st.toUpperCase())}</span></div>`;}).join('');
   const score=currentDataHealthScore();
@@ -789,9 +845,9 @@ function renderDataHealth(){
 window.addRaceWeekendCalendar=addRaceWeekendCalendar;window.shareText=shareText;
 
 function renderDrivers(){ view.innerHTML=titleBlock(`${YEAR} GRID`,'Drivers')+`<div class="driver-grid">${state.drivers.map(s=>driverCard(s)).join('')}</div>`; }
-function driverCard(s){ const team=s.Constructors?.at(-1)?.name||'',imgs=driverPhotoUrls(s),img=imgs[0],fb=imgs[1]||'';return `<div class="card driver-card clickable" onclick="setRoute('driver:${s.Driver.driverId}')"><i class="team-strip" style="background:${teamColour(team)}"></i><div class="driver-photo-holder">${img?`<img class="driver-photo" src="${esc(img)}" data-fallback="${esc(fb)}" data-code="${esc(driverCode(s.Driver))}" onerror="driverPhotoError(this)" alt="${esc(fullName(s.Driver))}" loading="lazy">`:`<div class="avatar">${esc(driverCode(s.Driver))}</div>`}</div><div class="driver-copy"><div class="driver-code">#${esc(s.Driver.permanentNumber||'—')} · ${esc(driverCode(s.Driver))}</div><div class="driver-full">${esc(fullName(s.Driver))}</div><div class="driver-bottom"><span>${esc(team)}</span><span><b>${esc(s.points)}</b> pts</span></div></div></div>`; }
+function driverCard(s){ const team=s.Constructors?.at(-1)?.name||'',imgs=driverPhotoUrls(s),img=imgs[0],fb=imgs[1]||'';return `<div class="card driver-card clickable ${isFavouriteDriver(s)?'is-favourite':''}" onclick="setRoute('driver:${s.Driver.driverId}')"><i class="team-strip" style="background:${teamColour(team)}"></i><div class="driver-photo-holder">${img?`<img class="driver-photo" src="${esc(img)}" data-fallback="${esc(fb)}" data-code="${esc(driverCode(s.Driver))}" onerror="driverPhotoError(this)" alt="${esc(fullName(s.Driver))}" loading="lazy">`:`<div class="avatar">${esc(driverCode(s.Driver))}</div>`}</div><div class="driver-copy"><div class="driver-code">#${esc(s.Driver.permanentNumber||'—')} · ${esc(driverCode(s.Driver))}</div><div class="driver-full">${esc(fullName(s.Driver))}</div><div class="driver-bottom"><span>${esc(team)}</span><span><b>${esc(s.points)}</b> pts</span></div></div></div>`; }
 function renderDriver(id){ const s=state.drivers.find(x=>x.Driver.driverId===id);if(!s)return setRoute('drivers');const d=s.Driver,team=s.Constructors?.at(-1)?.name||'',imgs=driverPhotoUrls(s),img=imgs[0],fb=imgs[1]||'';view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('drivers')">← DRIVERS</button></div><div class="spacer"></div><div class="card" style="overflow:hidden"><div style="display:grid;grid-template-columns:1fr 1fr;align-items:end;background:linear-gradient(135deg,#181818,#0d0d0d);border-left:6px solid ${teamColour(team)}"><div style="padding:20px"><div class="eyebrow">#${esc(d.permanentNumber||'—')} · ${esc(driverCode(d))}</div><h1 style="font-size:34px;margin:6px 0">${esc(fullName(d))}</h1><div class="muted">${esc(d.nationality)} · ${esc(team)}</div></div><div class="profile-photo-holder">${img?`<img src="${esc(img)}" data-fallback="${esc(fb)}" data-code="${esc(driverCode(d))}" onerror="driverPhotoError(this)" alt="${esc(fullName(d))}">`:`<div class="avatar profile-avatar">${esc(driverCode(d))}</div>`}</div></div><div style="padding:14px"><div class="facts"><div class="fact"><b>${esc(s.position)}</b><small>CHAMP POS</small></div><div class="fact"><b>${esc(s.points)}</b><small>POINTS</small></div><div class="fact"><b>${esc(s.wins)}</b><small>WINS</small></div><div class="fact"><b>${age(d.dateOfBirth)}</b><small>AGE</small></div><div class="fact"><b>${fmtDate(d.dateOfBirth+'T12:00:00Z',{day:'numeric',month:'short',year:'numeric'})}</b><small>BORN</small></div><div class="fact"><b>${esc(d.nationality)}</b><small>NATIONALITY</small></div></div><div class="spacer"></div><div class="actions"><a class="external-btn" href="${esc(d.url||'#')}" target="_blank" rel="noopener">PROFILE SOURCE ↗</a></div><div class="source-note">Driver photo uses the OpenF1 headshot where available, with a Wikipedia/Wikimedia fallback.</div></div></div>`; }
-function renderTeams(){ view.innerHTML=titleBlock(`${YEAR} GRID`,'Teams')+`<div class="grid two">${state.constructors.map(c=>`<div class="card" style="border-left:5px solid ${teamColour(c.Constructor.name)}"><div class="eyebrow">P${esc(c.position)}</div><div class="card-title" style="font-size:20px;margin-top:5px">${esc(c.Constructor.name)}</div><div class="stat-big">${esc(c.points)} <span class="muted" style="font-size:11px">PTS</span></div><div class="muted">${esc(c.wins)} wins · ${esc(c.Constructor.nationality||'')}</div></div>`).join('')}</div>`; }
+function renderTeams(){ view.innerHTML=titleBlock(`${YEAR} GRID`,'Teams')+`<div class="grid two">${state.constructors.map(c=>`<div class="card ${isFavouriteTeamName(c.Constructor.name)?'is-favourite':''}" style="border-left:5px solid ${teamColour(c.Constructor.name)}"><div class="eyebrow">P${esc(c.position)}</div><div class="card-title" style="font-size:20px;margin-top:5px">${esc(c.Constructor.name)}</div><div class="stat-big">${esc(c.points)} <span class="muted" style="font-size:11px">PTS</span></div><div class="muted">${esc(c.wins)} wins · ${esc(c.Constructor.nationality||'')}</div></div>`).join('')}</div>`; }
 function renderCircuits(){ view.innerHTML=titleBlock(`${YEAR} CALENDAR`,'Circuits')+`<div class="grid two">${state.schedule.map(r=>{const src=circuitSvg(r.Circuit.circuitId);return `<div class="card clickable" onclick="setRoute('circuit:${r.round}')">${src?`<div class="track-img-wrap"><img class="track-img" src="${src}" alt="${esc(r.Circuit.circuitName)} layout" loading="lazy"></div>`:''}<div class="eyebrow">${flag(r.Circuit.Location.country)} ${esc(r.Circuit.Location.country)}</div><div class="card-title" style="margin-top:5px">${esc(r.Circuit.circuitName)}</div><div class="muted" style="margin-top:3px">${esc(r.Circuit.Location.locality)}</div></div>`}).join('')}</div>`; }
 function renderCircuit(round){
   const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('circuits');const c=CIRCUITS[r.Circuit.circuitId]||{},src=circuitSvg(r.Circuit.circuitId);
@@ -1118,10 +1174,11 @@ function parseCarPresentation(raw){
     return cells.length?`\n| ${cells.join(' | ')} |\n`:all;
   });
   const lines=t.split('\n');
-  const groups={},teamOrder=[];let team=null;
+  const groups={},teamOrder=[],noUpdateTeams=new Set();let team=null;
   const ensure=n=>{if(!groups[n]){groups[n]=[];teamOrder.push(n);}return groups[n];};
   for(const line of lines){
     const maybe=carTeamName(line);if(maybe){team=maybe;ensure(team);continue;}
+    if(team&&/no updates submitted/i.test(line)){noUpdateTeams.add(team);continue;}
     if(!team||!line.trim().startsWith('|'))continue;
     const cells=line.split('|').slice(1,-1).map(cleanMarkdownInline);
     if(cells.length<3)continue;
@@ -1130,18 +1187,59 @@ function parseCarPresentation(raw){
     if(/updated component/i.test(component))continue;
     ensure(team).push({component,reason,diff,desc,badge:updateBadge(reason,desc,diff)});
   }
-  const teams=teamOrder.map(name=>({name,updates:groups[name]})).filter(x=>x.updates.length);
+  const teams=teamOrder.map(name=>({name,updates:groups[name],noUpdates:noUpdateTeams.has(name)})).filter(x=>x.updates.length||x.noUpdates);
   return {teams,plain:cleanFiaDocument(t)};
 }
+function carTeamSlug(name){return String(name||'team').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');}
+function carSchematicSvg(team,updates){
+  const mapped=CD?.mapUpdates(updates)||updates.map((u,i)=>({...u,map:{id:'unmapped',label:'Location not mapped',confidence:'LOW'},mapIndex:i+1}));
+  const accent=teamColour(team),seen={};
+  const markers=mapped.flatMap(u=>(u.maps?.length?u.maps:[u.map]).filter(z=>z?.top||z?.side).map(z=>({u,z}))).map(({u,z})=>{
+    const id=z.id,slot=seen[id]||0;seen[id]=slot+1;const d=(slot%3-1)*9;
+    const ref=`car-${carTeamSlug(team)}-${u.mapIndex}`;const title=`${u.mapIndex}. ${u.component} — ${z.label}`;
+    const one=(pt,side=false)=>pt?`<g class="car-marker ${side?'side-marker':''}" role="button" tabindex="0" onclick="focusCarUpdate('${ref}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();focusCarUpdate('${ref}')}"><title>${esc(title)}</title><circle cx="${pt[0]+d}" cy="${pt[1]+(side?d/3:d)}" r="12"></circle><text x="${pt[0]+d}" y="${pt[1]+(side?d/3:d)+4}">${u.mapIndex}</text></g>`:'';
+    return one(z.top)+one(z.side,true);
+  }).join('');
+  return `<svg class="car-schematic" viewBox="0 72 900 155" role="img" aria-label="Schematic Formula 1 car showing ${mapped.filter(x=>x.maps?.length||x.map.id!=='unmapped').length} mapped update locations for ${esc(team)}" style="--car-accent:${accent}">
+    <g class="car-view top-view">
+      <text class="view-label" x="58" y="88">TOP VIEW</text>
+      <rect class="car-part" x="58" y="141" width="61" height="34" rx="6"/><path class="car-part" d="M112 151 L181 141 L224 126 L395 126 L453 143 L514 146 L514 170 L453 173 L395 190 L224 190 L181 175 L112 165 Z"/>
+      <rect class="car-part" x="497" y="132" width="42" height="52" rx="7"/><rect class="tyre" x="164" y="95" width="31" height="48" rx="9"/><rect class="tyre" x="164" y="173" width="31" height="48" rx="9"/><rect class="tyre" x="391" y="93" width="34" height="50" rx="9"/><rect class="tyre" x="391" y="173" width="34" height="50" rx="9"/>
+      <path class="cockpit-shape" d="M285 136 Q319 112 353 136 L360 158 L353 180 Q319 202 285 180 L278 158 Z"/><path class="car-highlight-line" d="M220 158 H475"/>
+    </g>
+    <g class="car-view side-view">
+      <text class="view-label" x="500" y="88">SIDE VIEW</text>
+      <path class="car-part" d="M491 189 L535 181 L566 158 L624 153 L654 122 L697 118 L724 142 L788 153 L824 143 L854 147 L854 194 L491 194 Z"/>
+      <rect class="car-part" x="833" y="116" width="20" height="78" rx="5"/><rect class="car-part" x="492" y="175" width="52" height="10" rx="4"/>
+      <circle class="tyre" cx="582" cy="186" r="30"/><circle class="wheel-core" cx="582" cy="186" r="12"/><circle class="tyre" cx="758" cy="186" r="31"/><circle class="wheel-core" cx="758" cy="186" r="12"/>
+      <path class="cockpit-shape" d="M649 151 Q671 111 700 127 L709 151 Z"/><path class="car-highlight-line" d="M535 197 H841"/>
+    </g>${markers}
+  </svg>`;
+}
+function carMappingSummaryHtml(team,updates){
+  const summary=CD?.mappingSummary(updates)||{coverage:0,known:0,total:updates.length,high:0,mapped:updates.map((u,i)=>({...u,map:{id:'unmapped',label:'Location not mapped',confidence:'LOW'},mapIndex:i+1}))};
+  return `<div class="car-map-card"><div class="car-map-head"><div><div class="eyebrow">UPDATE LOCATION MAP</div><div class="card-title">${esc(team)} schematic</div></div><span class="map-coverage ${summary.coverage===100?'complete':''}">${summary.known}/${summary.total} mapped</span></div>${carSchematicSvg(team,updates)}<div class="map-note">Broad component locations are mapped from the FIA component name/description. This is a schematic 2026 F1 car, not team CAD geometry.</div></div>`;
+}
+function focusCarUpdate(id){const el=document.getElementById(id);if(!el)return;el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});el.classList.remove('update-flash');void el.offsetWidth;el.classList.add('update-flash');setTimeout(()=>el.classList.remove('update-flash'),1000);}
+function filterCarUpdateTeams(team){document.querySelectorAll('[data-update-team]').forEach(el=>el.classList.toggle('hidden',team!=='ALL'&&el.dataset.updateTeam!==team));document.querySelectorAll('[data-car-filter]').forEach(b=>b.classList.toggle('active',b.dataset.carFilter===team));}
+window.focusCarUpdate=focusCarUpdate;window.filterCarUpdateTeams=filterCarUpdateTeams;
 function carUpdatesHtml(parsed,doc){
   if(parsed.teams.length){
-    return `<div class="update-team-list">${parsed.teams.map(g=>`<div class="card update-team-card" style="border-left-color:${teamColour(g.name)}"><div class="update-team-head"><div class="card-title">${esc(g.name)}</div><div class="update-count">${g.updates.length} update${g.updates.length===1?'':'s'}</div></div>${g.updates.map(u=>`<div class="update-item"><div class="update-item-top"><b>${esc(u.component)}</b><span class="update-badge ${u.badge.toLowerCase()}">${esc(u.badge)}</span></div>${u.reason?`<div class="update-reason">${esc(u.reason)}</div>`:''}${u.desc?`<div class="update-desc">${esc(u.desc)}</div>`:''}${u.diff?`<details class="update-details"><summary>Geometry / difference</summary><div>${esc(u.diff)}</div></details>`:''}</div>`).join('')}</div>`).join('')}</div><div class="source-note">Official FIA Car Presentation Submission. Teams describe the component, primary reason and how the update differs from the previous specification.</div><div class="spacer"></div><div class="actions"><a class="external-btn" target="_blank" rel="noopener" href="${esc(doc.url)}">OFFICIAL FIA DOCUMENT ↗</a></div>`;
+    const fav=favouriteTeamName(),ordered=[...parsed.teams].sort((a,b)=>(b.name===fav)-(a.name===fav));
+    const filter=fav&&ordered.some(x=>x.name===fav)?`<div class="tabs car-team-filter"><button class="tab active" data-car-filter="ALL" onclick="filterCarUpdateTeams('ALL')">ALL TEAMS</button><button class="tab" data-car-filter="${esc(fav)}" onclick="filterCarUpdateTeams('${esc(fav)}')">★ MY TEAM</button></div>`:'';
+    const cards=ordered.map(g=>{
+      const mapped=CD?.mapUpdates(g.updates)||g.updates.map((u,i)=>({...u,map:{id:'unmapped',label:'Location not mapped',confidence:'LOW'},mapIndex:i+1}));
+      if(!g.updates.length)return `<div class="card update-team-card no-team-updates ${g.name===fav?'favourite-update-team':''}" data-update-team="${esc(g.name)}" style="border-left-color:${teamColour(g.name)}"><div class="update-team-head"><div><div class="card-title">${g.name===fav?'★ ':''}${esc(g.name)}</div><div class="muted update-team-sub">FIA Car Presentation Submission</div></div><div class="update-count zero">0 updates</div></div><div class="no-update-message"><b>NO UPDATES SUBMITTED</b><span>The team declared no new or revised components for this event.</span></div></div>`;
+      return `<div class="card update-team-card ${g.name===fav?'favourite-update-team':''}" data-update-team="${esc(g.name)}" style="border-left-color:${teamColour(g.name)}"><div class="update-team-head"><div><div class="card-title">${g.name===fav?'★ ':''}${esc(g.name)}</div><div class="muted update-team-sub">FIA-declared changes for this weekend</div></div><div class="update-count">${g.updates.length} update${g.updates.length===1?'':'s'}</div></div>${carMappingSummaryHtml(g.name,g.updates)}<div class="team-update-list">${mapped.map(u=>{const ref=`car-${carTeamSlug(g.name)}-${u.mapIndex}`;return `<div id="${ref}" class="update-item"><div class="update-item-top"><span class="update-number">${u.mapIndex}</span><b>${esc(u.component)}</b><span class="update-badge ${u.badge.toLowerCase()}">${esc(u.badge)}</span></div><button class="car-zone-chip confidence-${String(u.map.confidence||'low').toLowerCase()}" onclick="focusCarUpdate('${ref}')">⌖ ${esc((u.maps?.length?u.maps.map(z=>z.label).join(' + '):u.map.label))} · ${esc(u.map.confidence||'LOW')}</button>${u.reason?`<div class="update-reason">${esc(u.reason)}</div>`:''}${u.desc?`<div class="update-desc">${esc(u.desc)}</div>`:''}${u.diff?`<details class="update-details"><summary>Geometry / difference</summary><div>${esc(u.diff)}</div></details>`:''}</div>`;}).join('')}</div></div>`;
+    }).join('');
+    return `${filter}<div class="update-team-list">${cards}</div><div class="source-note">Official FIA Car Presentation Submission. Location markers are a broad schematic interpretation of the declared component name; the FIA text remains the source of truth for the actual geometry.</div><div class="spacer"></div><div class="actions"><a class="external-btn" target="_blank" rel="noopener" href="${esc(doc.url)}">OFFICIAL FIA DOCUMENT ↗</a></div>`;
   }
   if(parsed.plain){
     return `<div class="card fia-text-card">${renderFiaText(parsed.plain)}</div><div class="source-note">The FIA document was found, but its table layout could not be split reliably into team cards. The readable official text is shown instead.</div><div class="spacer"></div><div class="actions"><a class="external-btn" target="_blank" rel="noopener" href="${esc(doc.url)}">OFFICIAL FIA DOCUMENT ↗</a></div>`;
   }
   return '<div class="card"><div class="empty">No update rows could be read from the FIA document.</div></div>';
 }
+
 async function getCarUpdateDoc(r){
   const cached=state.carUpdateDocs[String(r.round)];if(cached)return cached;
   const text=await fetchText(JINA+FIA_DOCS,'fia-docs',20*60e3);
@@ -1168,7 +1266,7 @@ function renderUpdates(){
     const status=raceSessionDone(r)?'PAST WEEKEND':'CURRENT WEEKEND';
     return `<div class="card clickable development-race" onclick="setRoute('carupdates:${r.round}')"><div class="round-box"><small>ROUND</small><b>${esc(r.round)}</b></div><div><div class="race-name">${flag(r.Circuit.Location.country)} ${esc(r.raceName)}</div><div class="race-place">${esc(r.Circuit.circuitName)} · ${fmtDate(raceIso(r),{day:'numeric',month:'short'})}</div></div><div class="development-status">${status}<b>UPDATES ›</b></div></div>`;
   }).join('');
-  view.innerHTML=titleBlock(`${YEAR} SEASON`,'Car Development')+`<div class="card development-intro"><div class="eyebrow">OFFICIAL FIA SUBMISSIONS</div><div class="card-title" style="margin-top:5px">Race-by-race car updates</div><div class="muted" style="margin-top:5px">Only completed rounds and the active race weekend are shown. Tap a round to see what every team declared.</div></div><div class="spacer"></div>${rows?`<div class="grid">${rows}</div>`:'<div class="empty">No race weekend has started yet this season.</div>'}<div class="source-note">The FIA submissions are the primary technical source. The current weekend may remain unavailable until its Car Presentation Submission is published.</div>`;
+  view.innerHTML=titleBlock(`${YEAR} SEASON`,'Car Development')+`<div class="card development-intro"><div class="eyebrow">OFFICIAL FIA SUBMISSIONS · VISUALISED</div><div class="card-title" style="margin-top:5px">See where every declared update sits on the car</div><div class="muted" style="margin-top:5px">F1 Hub reads the FIA Car Presentation Submission, keeps the team's own explanation, and maps recognised components onto a top/side schematic. Tap a numbered marker to jump to the corresponding update.</div>${favouriteTeamName()?`<div class="development-my-team" style="--team:${teamColour(favouriteTeamName())}"><i></i><span>MY TEAM · ${esc(favouriteTeamName())} will be shown first</span></div>`:''}</div><div class="spacer"></div>${rows?`<div class="grid">${rows}</div>`:'<div class="empty">No race weekend has started yet this season.</div>'}<div class="source-note">The FIA submission is the primary technical source. Diagram locations are broad component-level maps, not team CAD geometry. The current weekend may remain unavailable until its Car Presentation Submission is published.</div>`;
 }
 async function renderCarUpdates(round){
   const r=state.schedule.find(x=>String(x.round)===String(round));if(!r)return setRoute('updates');
@@ -1837,7 +1935,7 @@ document.getElementById('brand-btn').addEventListener('click',()=>setRoute('home
 document.getElementById('connection-pill')?.addEventListener('click',()=>setRoute('datahealth'));
 document.getElementById('update-now')?.addEventListener('click',applyAppUpdate);
 document.getElementById('install-app-btn')?.addEventListener('click',requestInstall);
-window.addEventListener('popstate',()=>{state.route=decodeURIComponent(location.hash.slice(1)||'home');document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',parentNav(state.route)===b.dataset.route));render();});
+window.addEventListener('popstate',()=>{state.route=decodeURIComponent(location.hash.slice(1)||'home');document.querySelectorAll('.nav-btn').forEach(b=>b.classList.toggle('active',parentNav(state.route)===b.dataset.route));render();requestAnimationFrame(animateRouteContent);});
 document.getElementById('refresh-btn').addEventListener('click',async()=>{if(state.refreshing)return;toast('Refreshing…');await loadBase(true);toast('Updated');});
 window.addEventListener('online',()=>{document.getElementById('connection-pill').textContent='ONLINE';document.getElementById('connection-pill').className='pill good';});
 window.addEventListener('offline',()=>{document.getElementById('connection-pill').textContent='OFFLINE';document.getElementById('connection-pill').className='pill warn';});
@@ -1865,4 +1963,5 @@ setInterval(()=>{if(!document.hidden&&state.loaded&&Date.now()-(state.newsUpdate
 setInterval(()=>{if(!document.hidden)checkForUpdate();},15*60e3);
 // Paint cached content immediately, then refresh it without blocking startup.
 hydrateBaseFromCache();
+applyPersonalTheme();
 loadBase();

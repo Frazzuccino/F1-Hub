@@ -1,4 +1,4 @@
-# F1 Hub v1.17.0 — update / install
+# F1 Hub v1.18.0 — update / install
 
 ## Update GitHub Pages
 
@@ -6,31 +6,26 @@ Replace the files in your existing F1 Hub GitHub Pages repository with everythin
 
 For this upgrade, open the deployed app once with:
 
-`?v=1170`
+`?v=1180`
 
-In **More**, the footer should show **F1 Hub v1.17.0**.
+In **More**, the footer should show **F1 Hub v1.18.0**.
 
-## Main changes in v1.17.0
+## Main changes in v1.18.0
 
-- Replaced the previous Car Development top/side silhouette with a visibly different three-quarter technical F1 drawing.
-- Added dedicated three-quarter marker coordinates for FIA update locations.
-- The NEXT card on Race Calendar now scrolls to, expands and highlights the corresponding round in the main calendar.
-- Driver season history now includes championship position for each year, using Jolpica driver standings.
-- Driver career archive requests are rate-limit friendly as well as fully paginated.
-- Driver Compare explicitly supports vertical touch scrolling on long comparison pages.
-- Reworked swipe transitions so a second swipe can start immediately after the first; stale transition cleanup no longer cancels the next gesture.
+- Replaced the inaccurate hand-drawn Car Development car with a cleaned dark technical rendering based directly on the supplied 2026 multi-view F1 schematic; FIA update markers sit on the proper rear/top/front/side views.
+- Redesigned Driver Compare so graphics and H2H information appear before the driver photo cards, with an At a Glance duel, H2H summary, radar chart, metric bars, stat chips and points evolution.
+- Improved News-tab swipe responsiveness by allowing gestures to begin on article cards, rendering a smaller mobile news batch, and using a lightweight transition snapshot instead of cloning the full feed.
+- The top NEXT race shortcut now scrolls to/highlights the normal calendar card only. It no longer injects FP1/session details or an OPEN RACE HUB panel into that card.
+- Added stricter Formula 1 relevance filtering to stop unrelated Google News/RSS results such as tennis US Open stories entering the feed.
 
 ## Testing
 
-On Windows with Node installed, run:
-
-`RUN-TESTS.bat`
-
-or manually run:
+On Windows with Node installed, run `RUN-TESTS.bat`, or manually run:
 
 - `node tests/test-quality.js`
 - `node tests/test-feature-gates.js`
 - `node tests/runtime-smoke.js`
 - `node tests/swipe-repeat-smoke.js`
+- `node tests/v118-fixes-smoke.js`
 
 The release acceptance target is 100% automated checks and at least 9/10 for every requested feature group.

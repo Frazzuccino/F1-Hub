@@ -25,7 +25,7 @@ test('freshness classifies stale records',()=>ok(Q.freshness(Date.now()-400000,6
 test('quality scoring weights categories',()=>ok(Q.overallQualityScore({data:9,reliability:9,performance:9,ux:9,features:9,pwa:9,accessibility:9,tests:9})===9),'tests');
 
 const app=fs.readFileSync(path.join(ROOT,'app.js'),'utf8'),html=fs.readFileSync(path.join(ROOT,'index.html'),'utf8'),css=fs.readFileSync(path.join(ROOT,'styles.css'),'utf8'),sw=fs.readFileSync(path.join(ROOT,'service-worker.js'),'utf8'),manifest=JSON.parse(fs.readFileSync(path.join(ROOT,'manifest.json'),'utf8'));
-test('release version is 1.17.0',()=>ok(app.includes("APP_VERSION = '1.17.0'")),'pwa');
+test('release version is 1.18.0',()=>ok(app.includes("APP_VERSION = '1.18.0'")),'pwa');
 test('quality core loads before app',()=>ok(html.indexOf('quality-core.js')<html.indexOf('app.js')),'reliability');
 test('car development core loads before app',()=>ok(html.indexOf('car-development-core.js')>0&&html.indexOf('car-development-core.js')<html.indexOf('app.js')),'reliability');
 test('driver career core loads before app',()=>ok(html.indexOf('driver-career-core.js')>0&&html.indexOf('driver-career-core.js')<html.indexOf('app.js')),'reliability');
@@ -90,12 +90,12 @@ test('real FIA exhaust tailpipe bracket maps to rear body',()=>ok(CD.matchZone({
 test('combined FIA component maps to multiple physical zones',()=>eq(CD.matchZones({component:'Floor Edge and Diffuser'}).map(x=>x.id),['floor','diffuser']),'features');
 test('description-only part mapping is marked medium confidence',()=>ok(CD.matchZone({component:'Bodywork update',desc:'Revised rear wing endplate geometry'}).confidence==='MEDIUM'),'reliability');
 test('unknown components are not given false precise locations',()=>ok(CD.matchZone({component:'Experimental assembly'}).id==='unmapped'),'reliability');
-test('car update UI has three-quarter technical schematic',()=>ok(app.includes('TECHNICAL 3/4 VIEW')&&app.includes('carSchematicSvg')&&app.includes('car-schematic-v3')),'features');
+test('car update UI uses official-style 2026 schematic map',()=>ok(app.includes('carSchematicSvg')&&app.includes('official-schematic')&&app.includes('tech-car-reference-clean2.png')),'features');
 test('car schematic discloses it is not CAD geometry',()=>ok(app.includes('not team CAD geometry')),'reliability');
 test('Car Development keeps explicit zero-update teams and parse warnings',()=>ok(app.includes('NO UPDATES SUBMITTED')&&app.includes('UPDATE TABLE COULD NOT BE SPLIT')&&app.includes('parseWarning')),'features');
 test('car markers link to update details',()=>ok(app.includes('focusCarUpdate')&&app.includes('update-flash')),'ux');
-test('service worker caches car-development core',()=>ok(sw.includes('car-development-core.js?v=1.17.0')),'performance');
-test('service worker caches driver-career core',()=>ok(sw.includes('driver-career-core.js?v=1.17.0')),'performance');
+test('service worker caches car-development core',()=>ok(sw.includes('car-development-core.js?v=1.18.0')),'performance');
+test('service worker caches driver-career core',()=>ok(sw.includes('driver-career-core.js?v=1.18.0')),'performance');
 // Motion quality: transitions only on navigation, not every background render.
 test('route motion helper exists',()=>ok(app.includes('function animateRouteContent')),'ux');
 test('render no longer replays view animation every refresh',()=>{const r=app.slice(app.indexOf('function render(){'),app.indexOf('function titleBlock'));ok(!r.includes("classList.add('view-enter')"));},'performance');
@@ -129,8 +129,8 @@ test('Race Calendar selection animates before opening race hub',()=>ok(app.inclu
 test('career pagination creates all required offsets',()=>eq(CAREER.pageOffsets(393,100),[0,100,200,300]),'data');
 test('career builder handles a 393-race archive without truncation',()=>{const rows=[];for(let i=0;i<393;i++){const pos=i<106?1:i<207?2:4;rows.push({season:String(2007+Math.floor(i/20)),round:String((i%20)+1),Results:[{position:String(pos),Constructor:{name:i<120?'McLaren':'Mercedes'}}]});}const c=CAREER.build(rows,393);ok(c.starts===393&&c.wins===106&&c.podiums===207&&c.complete);},'data');
 test('career UI labels full Grand Prix total rather than misleading 100-start sample',()=>ok(app.includes('<small>GRANDS PRIX</small>')&&app.includes('every paginated Jolpica/Ergast Grand Prix result')),'features');
-test('car drawing uses a visibly different three-quarter technical geometry',()=>ok(app.includes('car-schematic-v3')&&app.includes('car-perspective')&&app.includes('front-wing')&&app.includes('halo-shape')&&app.includes('rear-wing-main')),'features');
-test('car schematic is tall enough for a readable three-quarter reference view',()=>ok(app.includes('viewBox="0 0 1000 610"')),'ux');
+test('car drawing uses official multi-view 2026 geometry guidance',()=>ok(app.includes('official-schematic')&&app.includes('tech-car-reference-clean2.png')&&app.includes('OFFICIAL_SCHEMATIC_MARKERS')),'features');
+test('car schematic has official multi-view labels and marker buttons',()=>ok(app.includes('REAR VIEW')&&app.includes('TOP VIEW')&&app.includes('schematic-marker')),'ux');
 test('car mapping has dedicated perspective coordinates',()=>ok(CD.matchZone({component:'Rear Wing'}).perspective[1]<300&&CD.matchZone({component:'Front Wing'}).perspective[1]>430),'features');
 test('swipe uses direct finger translation rather than a 64px resisted nudge',()=>ok(app.includes('edge=tgt?Math.max(-width,Math.min(width,dx)):dx*.16')&&!app.includes('Math.max(-64,Math.min(64')),'ux');
 test('swipe commit uses responsive distance and smoothed velocity thresholds',()=>ok(app.includes('velocityX=.65*velocityX+.35*')&&app.includes('width*.17')&&app.includes('velocityGuess>.28')),'ux');
@@ -142,15 +142,15 @@ test('launch animation respects reduced motion',()=>ok(css.includes('.launch-bra
 
 
 // v1.17 physical-device follow-up gates
-test('next-race calendar summary focuses the actual round instead of navigating away',()=>ok(app.includes('function focusCalendarRound')&&app.includes('scrollIntoView')&&app.includes('calendarExpandedRound')),'ux');
-test('focused race card reveals weekend sessions and race-hub action',()=>ok(app.includes('calendar-expanded')&&app.includes('calendarSessionMini')&&app.includes('OPEN RACE HUB')),'features');
+test('next-race calendar summary focuses the actual round instead of navigating away',()=>ok(app.includes('function focusCalendarRound')&&app.includes('scrollIntoView')&&app.includes('calendarFocusRound')),'ux');
+test('focused race card uses simple highlight behaviour in main calendar',()=>ok(app.includes('calendarFocusRound')&&!app.includes('OPEN RACE HUB')),'features');
 test('career seasons fetch official championship positions',()=>ok(app.includes('async function fetchDriverSeasonPositions')&&app.includes('/driverstandings/')&&app.includes('champPosition')),'data');
 test('career core can attach season standings without changing race totals',()=>{const c=CAREER.build([{season:'2020',round:'1',Results:[{position:'1',Constructor:{name:'Mercedes'}}]}],1);const x=CAREER.attachStandings(c,{'2020':{position:1,points:'347'}});ok(x.starts===1&&x.seasons[0].champPosition===1&&x.seasons[0].champPoints==='347');},'data');
 test('career archive pagination is rate-limit friendly',()=>ok(app.includes('offsets.slice(i,i+2)')&&app.includes('await sleep(480)')),'reliability');
 test('driver compare explicitly opts into vertical touch scrolling',()=>ok(app.includes('class=\"compare-page\"')&&css.includes('.compare-page{touch-action:pan-y')),'ux');
 test('swipe route changes update state immediately and snapshot the outgoing page',()=>ok(app.includes('snapshot=makeSnapshot();resetGesture()')&&app.includes('state.route=route')),'ux');
 test('a new touch cancels stale swipe animation instead of waiting for timeout',()=>ok(app.includes('stopVisual();const p=e.touches[0]')&&css.includes('.swipe-snapshot')),'ux');
-test('technical car diagram is a single three-quarter reference drawing rather than the old stacked views',()=>ok(app.includes('TECHNICAL 3/4 VIEW')&&!app.slice(app.indexOf('function carSchematicSvg'),app.indexOf('function carMappingSummaryHtml')).includes('TOP VIEW')),'features');
+test('technical car diagram uses official multi-view labels',()=>ok(app.slice(app.indexOf('function carSchematicSvg'),app.indexOf('function carMappingSummaryHtml')).includes('TOP VIEW')&&app.includes('2026 multi-view F1 technical reference schematic')),'features');
 const cats={};for(const r of results){cats[r.category]??={pass:0,total:0};cats[r.category].total++;if(r.ok)cats[r.category].pass++;}
 const score=10*passed/(passed+failed);
 console.log(`\nF1 HUB QUALITY TESTS: ${passed}/${passed+failed} passed`);for(const [k,v] of Object.entries(cats))console.log(`${k.padEnd(14)} ${v.pass}/${v.total}`);console.log(`TEST SCORE: ${score.toFixed(2)}/10`);

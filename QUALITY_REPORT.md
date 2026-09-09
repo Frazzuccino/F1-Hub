@@ -1,45 +1,61 @@
-# F1 Hub v1.17.0 — Quality Report
+# F1 Hub v1.18.0 Quality Report
 
-## Release result
+## User-requested fixes
 
-**Overall product rating: 9.7/10**
+### 1. Technical car diagram
 
-**Automated quality gate: 122/122 passed — 10.00/10**
+The previous three-quarter drawing was rejected because it did not resemble the supplied 2026 F1 technical schematic closely enough.
 
-| Category | Passed |
-|---|---:|
-| Data | 14/14 |
-| Reliability | 18/18 |
-| Features | 43/43 |
-| PWA | 5/5 |
-| UX | 23/23 |
-| Accessibility | 7/7 |
-| Performance | 11/11 |
-| Test framework | 1/1 |
+v1.18.0 now uses a cleaned, cropped and dark-rendered version based directly on the **user-supplied 2026 rear/top/front/side reference schematic**. The unrelated red annotations from the reference were removed programmatically and F1 Hub overlays its own numbered FIA-update markers.
 
-Additional release checks:
+Marker zones are mapped to appropriate views (for example rear wing/diffuser on rear view, cockpit/cooling/top-body areas on top view, floor/sidepod/front/rear corner on side/front views). The app still states that these are approximate component locations rather than team CAD geometry.
 
-- Feature acceptance gates: **all groups 10.00/10**
-- Browser-like runtime/render smoke test: **PASS**
-- Immediate repeat-swipe simulation: **PASS**
-- JavaScript syntax checks: **PASS**
-- Three-quarter car SVG raster render: **PASS**
-- Manifest/version consistency: **PASS**
-- ZIP integrity: checked before delivery
+### 2. Driver Compare
 
-## Regressions specifically covered
+The old result could look like little more than two large driver photos.
 
-- Car Development uses the new `car-schematic-v3` three-quarter drawing rather than the previous stacked top/side schematic.
-- FIA zones include dedicated perspective coordinates for front wing, nose, suspension/corners, floor, sidepod, cockpit, cooling, diffuser and rear wing areas.
-- The top NEXT calendar card can focus and expand its corresponding round in the main season timeline.
-- Expanded calendar cards expose weekend sessions and a Race Hub action.
-- Season-by-season driver rows can accept championship positions from the official season standings endpoint.
-- Career totals remain unchanged when championship-position metadata is attached.
-- Long driver careers remain paginated beyond the 100-record API cap and now use rate-limit-friendly batches.
-- Driver Compare explicitly allows vertical mobile panning.
-- A second section swipe works immediately after the first without waiting for the previous transition timer.
-- Existing results ordering, standings validation, historical weather, news handling, PWA cache/update behaviour and accessibility checks remain in the regression suite.
+The new hierarchy is:
 
-## Why the product rating is not 10/10
+1. At a Glance duel bars
+2. Qualifying/race H2H summary
+3. Radar comparison + detailed metric bars
+4. Driver cards with six visible stat chips each
+5. Points-evolution chart
 
-F1 Hub still relies on public third-party data services. Network availability, delayed source publication and provider-side schema changes are outside the app's control. Also, while the repeat-swipe state machine is now simulated in tests, the final judgement of gesture feel still belongs on the real Android device.
+This makes the actual comparison visible before the photos.
+
+### 3. News swipe responsiveness
+
+Three changes target the News-specific slowdown:
+
+- horizontal swipes may begin on article links/cards;
+- mobile initially renders 18 stories rather than the entire cached feed, with **Show More** available;
+- when swiping away from News, the app uses a lightweight transition snapshot instead of cloning the full article DOM.
+
+The existing immediate repeat-swipe regression test remains enabled.
+
+### 4. NEXT race calendar shortcut
+
+The top NEXT card now scrolls to and briefly highlights the matching normal calendar entry. The focused entry is visually identical in content to the other main-calendar entries and no longer inserts FP1, weekend sessions or an **OPEN RACE HUB** section.
+
+Tapping the normal calendar entry itself still opens that race in the usual way.
+
+### 5. News relevance
+
+News is now checked against explicit F1 topics/drivers/teams/circuits and obvious non-F1 sport terms. A regression fixture verifies that a **US Open wheelchair doubles** headline is rejected while an F1 Ferrari/Monza story is retained.
+
+## Test results
+
+- `node --check app.js` → **PASS**
+- `node tests/test-quality.js` → **122/122 PASS (10.00/10)**
+- `node tests/test-feature-gates.js` → **PASS (10.00/10 average)**
+- `node tests/runtime-smoke.js` → **PASS**
+- `node tests/swipe-repeat-smoke.js` → **PASS**
+- `node tests/v118-fixes-smoke.js` → **PASS**
+- Technical schematic raster/marker inspection → **PASS**
+- ZIP integrity → required before handoff
+
+## Release score
+
+Requested-update score: **9.6/10**  
+Automated regression score: **10.00/10**

@@ -186,7 +186,7 @@ The vane improves aerodynamic performance.
 
   const none=vm.runInThisContext("parseCarPresentation('Aston Martin Aramco F1 Team\\nNo updates submitted for this event.')");if(none.teams.length!==1||!none.teams[0].noUpdates)throw new Error('FIA no-update team parser failed');
   const carHtml=vm.runInThisContext("carUpdatesHtml(parseCarPresentation('Mercedes\\n| 1 | Front Wing | Circuit specific | Revised flap | Lower drag |'),{url:'https://fia.example/doc.pdf'})");
-  if(!carHtml.includes('TECHNICAL 3/4 VIEW')||!carHtml.includes('car-schematic-v3')||!carHtml.includes('car-perspective')||!carHtml.includes('halo-shape')||!carHtml.includes('Front wing'))throw new Error('three-quarter car schematic render failed');
+  if(!carHtml.includes('official-schematic')||!carHtml.includes('tech-car-reference-clean2.png')||!carHtml.includes('REAR VIEW')||!carHtml.includes('schematic-marker'))throw new Error('official multi-view car schematic render failed');
 
   const theme=vm.runInThisContext("(()=>{state.favouriteTeam='McLaren';state.personalTheme=true;applyPersonalTheme();return favouriteTeamName();})()");if(theme!=='McLaren')throw new Error('My F1 theme runtime failed');
   const standingsHtml=vm.runInThisContext("standingRow({position:'1',points:'100',wins:'2',Driver:{code:'AAA',familyName:'Alpha'},Constructors:[{name:'McLaren'}]})");
@@ -221,8 +221,8 @@ The vane improves aerodynamic performance.
     return {races,more,standings,news,weatherHtml};
   })()`);
   if(!rendered.races.includes('calendar-overview')||!rendered.races.includes('calendar-race')||!rendered.races.includes('focusCalendarRound'))throw new Error('race calendar render smoke failed');
-  const expandedCalendar=vm.runInThisContext("(()=>{state.calendarExpandedRound='2';renderRaces();return view.innerHTML})()");if(!expandedCalendar.includes('calendar-expanded')||!expandedCalendar.includes('OPEN RACE HUB'))throw new Error('calendar next-round expansion render failed');
-  vm.runInThisContext("focusCalendarRound('2')");if(vm.runInThisContext('state.calendarExpandedRound')!=='2')throw new Error('calendar focus state failed');
+  const focusedCalendar=vm.runInThisContext("(()=>{state.calendarFocusRound='2';renderRaces();return view.innerHTML})()");if(!focusedCalendar.includes('calendar-race')||focusedCalendar.includes('OPEN RACE HUB'))throw new Error('calendar next-round focus render failed');
+  vm.runInThisContext("focusCalendarRound('2')");if(vm.runInThisContext('state.calendarFocusRound')!=='2')throw new Error('calendar focus state failed');
   const careerHtml=vm.runInThisContext("driverCareerHtml(F1HubDriverCareer.attachStandings(buildDriverCareer([{season:'2019',round:'1',Results:[{position:'5',Constructor:{name:'Team'}}]}],1),{'2019':{position:6,points:'90'}}))");if(!careerHtml.includes('P6')||!careerHtml.includes('CHAMPIONSHIP'))throw new Error('career season championship finish render failed');
   if(rendered.more.includes('>Teams<')||rendered.more.indexOf('My F1')<rendered.more.indexOf('Data Health'))throw new Error('More hierarchy render smoke failed');
   if(rendered.standings.includes('is-favourite')||rendered.standings.includes('★'))throw new Error('standings neutral render smoke failed');

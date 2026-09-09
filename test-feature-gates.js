@@ -19,7 +19,7 @@ scores.push(gate('Car Development parsing & mapping',[
  ['combined components can map twice',()=>CD.matchZones({component:'Floor Edge and Diffuser'}).length===2],
  ['unknown components remain honest',()=>CD.matchZone({component:'Mystery Device'}).id==='unmapped'],
  ['official source link retained',()=>app.includes('OFFICIAL FIA DOCUMENT ↗')],
- ['reference-style three-quarter car includes halo/suspension/wings',()=>app.includes('car-schematic-v3')&&app.includes('car-perspective')&&app.includes('halo-shape')&&app.includes('suspension')&&app.includes('rear-wing-main')]
+ ['official-style 2026 car map uses multi-view schematic image',()=>app.includes('official-schematic')&&app.includes('tech-car-reference-clean2.png')&&app.includes('schematic-marker')&&app.includes('REAR VIEW')&&app.includes('SIDE VIEW')]
 ]));
 
 scores.push(gate('Favourite cleanup',[
@@ -45,7 +45,7 @@ scores.push(gate('Swipe navigation',[
  ['old swipe visual can be interrupted by next touch',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('stopVisual();const p=e.touches[0]')],
  ['outgoing page snapshot gives continuous transition',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('makeSnapshot()')&&css.includes('.swipe-snapshot')],
  ['edge resistance only applies beyond navigation edge',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('dx*.16')],
- ['interactive controls excluded',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('a,button,input,select,textarea')],
+ ['swipe gestures can start on article links while buttons stay excluded',()=>!section('function setupSwipeNavigation','function enhanceAccessibility').includes('a,button,input,select,textarea')&&section('function setupSwipeNavigation','function enhanceAccessibility').includes('button,input,select,textarea')],
  ['weather tabs excluded',()=>section('function setupSwipeNavigation','function enhanceAccessibility').includes('.weather-session-tabs')],
  ['left/right route animation classes',()=>css.includes('.route-swipe-left')&&css.includes('.route-swipe-right')],
  ['reduced motion remains supported',()=>css.includes('prefers-reduced-motion:reduce')]
@@ -97,7 +97,7 @@ scores.push(gate('Race Calendar redesign',[
  ['progress bar',()=>app.includes('calendar-progress')],
  ['next-race summary',()=>app.includes('calendar-next')],
  ['next-race summary scrolls to main calendar round',()=>app.includes('function focusCalendarRound')&&section('function renderRaces','function renderStandings').includes('focusCalendarRound')],
- ['focused calendar round expands session details',()=>app.includes('calendar-expanded')&&app.includes('calendarSessionMini')],
+ ['focused calendar round now highlights the main calendar card without extra session UI',()=>app.includes('calendarFocusRound')&&!app.includes('OPEN RACE HUB')],
  ['month grouping',()=>app.includes('calendarMonthLabel')&&app.includes('calendar-month')],
  ['timeline rail',()=>app.includes('calendar-rail')&&css.includes('.calendar-list:before')],
  ['track silhouette in cards',()=>section('function calendarRaceCard','function renderRaces').includes('calendar-track')],

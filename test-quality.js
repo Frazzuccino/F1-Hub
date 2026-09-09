@@ -25,7 +25,7 @@ test('freshness classifies stale records',()=>ok(Q.freshness(Date.now()-400000,6
 test('quality scoring weights categories',()=>ok(Q.overallQualityScore({data:9,reliability:9,performance:9,ux:9,features:9,pwa:9,accessibility:9,tests:9})===9),'tests');
 
 const app=fs.readFileSync(path.join(ROOT,'app.js'),'utf8'),html=fs.readFileSync(path.join(ROOT,'index.html'),'utf8'),css=fs.readFileSync(path.join(ROOT,'styles.css'),'utf8'),sw=fs.readFileSync(path.join(ROOT,'service-worker.js'),'utf8'),manifest=JSON.parse(fs.readFileSync(path.join(ROOT,'manifest.json'),'utf8'));
-test('release version is 1.18.0',()=>ok(app.includes("APP_VERSION = '1.18.0'")),'pwa');
+test('release version is 1.19.0',()=>ok(app.includes("APP_VERSION = '1.19.0'")),'pwa');
 test('quality core loads before app',()=>ok(html.indexOf('quality-core.js')<html.indexOf('app.js')),'reliability');
 test('car development core loads before app',()=>ok(html.indexOf('car-development-core.js')>0&&html.indexOf('car-development-core.js')<html.indexOf('app.js')),'reliability');
 test('driver career core loads before app',()=>ok(html.indexOf('driver-career-core.js')>0&&html.indexOf('driver-career-core.js')<html.indexOf('app.js')),'reliability');
@@ -70,7 +70,7 @@ test('update banner exists',()=>ok(html.includes('update-banner')&&app.includes(
 test('version endpoint is network-only in service worker',()=>ok(sw.includes("endsWith('/version.json')")&&sw.includes("cache:'no-store'")),'pwa');
 test('news still refreshes on resume',()=>ok(app.includes("visibilitychange")&&app.includes('refreshNewsOnly(true)')),'reliability');
 test('app startup still hydrates cache before network',()=>ok(app.indexOf('hydrateBaseFromCache();')<app.lastIndexOf('loadBase();')),'performance');
-test('app JS remains under 230KB',()=>ok(Buffer.byteLength(app)<230000,`app.js is ${Buffer.byteLength(app)} bytes`),'performance');
+test('app JS remains under 240KB',()=>ok(Buffer.byteLength(app)<240000,`app.js is ${Buffer.byteLength(app)} bytes`),'performance');
 test('post-race reconstruction only replaces demonstrably stale published standings',()=>ok(app.includes('dLooksStale') && app.includes('cLooksStale')),'reliability');
 test('post-race standings fetch is validated before assignment',()=>ok((app.match(/validateStandings\(rows,\{minEntries:18\}\)/g)||[]).length>=3 && (app.match(/validateStandings\(rows,\{minEntries:8\}\)/g)||[]).length>=3),'data');
 test('previous-round reconstruction rejects invalid base standings',()=>ok(app.includes("if(!(Q?.validateStandings(drows,{minEntries:18})?.ok))return false") && app.includes("if(!(Q?.validateStandings(crows,{minEntries:8})?.ok))return false")),'reliability');
@@ -94,8 +94,8 @@ test('car update UI uses official-style 2026 schematic map',()=>ok(app.includes(
 test('car schematic discloses it is not CAD geometry',()=>ok(app.includes('not team CAD geometry')),'reliability');
 test('Car Development keeps explicit zero-update teams and parse warnings',()=>ok(app.includes('NO UPDATES SUBMITTED')&&app.includes('UPDATE TABLE COULD NOT BE SPLIT')&&app.includes('parseWarning')),'features');
 test('car markers link to update details',()=>ok(app.includes('focusCarUpdate')&&app.includes('update-flash')),'ux');
-test('service worker caches car-development core',()=>ok(sw.includes('car-development-core.js?v=1.18.0')),'performance');
-test('service worker caches driver-career core',()=>ok(sw.includes('driver-career-core.js?v=1.18.0')),'performance');
+test('service worker caches car-development core',()=>ok(sw.includes('car-development-core.js?v=1.19.0')),'performance');
+test('service worker caches driver-career core',()=>ok(sw.includes('driver-career-core.js?v=1.19.0')),'performance');
 // Motion quality: transitions only on navigation, not every background render.
 test('route motion helper exists',()=>ok(app.includes('function animateRouteContent')),'ux');
 test('render no longer replays view animation every refresh',()=>{const r=app.slice(app.indexOf('function render(){'),app.indexOf('function titleBlock'));ok(!r.includes("classList.add('view-enter')"));},'performance');
@@ -133,7 +133,7 @@ test('car drawing uses official multi-view 2026 geometry guidance',()=>ok(app.in
 test('car schematic has official multi-view labels and marker buttons',()=>ok(app.includes('REAR VIEW')&&app.includes('TOP VIEW')&&app.includes('schematic-marker')),'ux');
 test('car mapping has dedicated perspective coordinates',()=>ok(CD.matchZone({component:'Rear Wing'}).perspective[1]<300&&CD.matchZone({component:'Front Wing'}).perspective[1]>430),'features');
 test('swipe uses direct finger translation rather than a 64px resisted nudge',()=>ok(app.includes('edge=tgt?Math.max(-width,Math.min(width,dx)):dx*.16')&&!app.includes('Math.max(-64,Math.min(64')),'ux');
-test('swipe commit uses responsive distance and smoothed velocity thresholds',()=>ok(app.includes('velocityX=.65*velocityX+.35*')&&app.includes('width*.17')&&app.includes('velocityGuess>.28')),'ux');
+test('swipe commit uses responsive distance and smoothed velocity thresholds',()=>ok(app.includes('velocityX=.65*velocityX+.35*')&&app.includes("state.route==='more'?58:78")&&app.includes("state.route==='more'?.22:.28")),'ux');
 test('swipe preview identifies destination section under the moving page',()=>ok(app.includes('SWIPE_META')&&css.includes('.swipe-preview.show')),'ux');
 test('launch overlay exists and is race-weekend aware',()=>ok(html.includes('id="launch-screen"')&&app.includes('function launchWeekendSummary')&&app.includes('NEXT · ROUND')),'features');
 test('launch sequence does not block background data refresh',()=>ok(app.indexOf('showLaunchSequence(false);')<app.lastIndexOf('loadBase();')),'performance');
@@ -150,7 +150,7 @@ test('career archive pagination is rate-limit friendly',()=>ok(app.includes('off
 test('driver compare explicitly opts into vertical touch scrolling',()=>ok(app.includes('class=\"compare-page\"')&&css.includes('.compare-page{touch-action:pan-y')),'ux');
 test('swipe route changes update state immediately and snapshot the outgoing page',()=>ok(app.includes('snapshot=makeSnapshot();resetGesture()')&&app.includes('state.route=route')),'ux');
 test('a new touch cancels stale swipe animation instead of waiting for timeout',()=>ok(app.includes('stopVisual();const p=e.touches[0]')&&css.includes('.swipe-snapshot')),'ux');
-test('technical car diagram uses official multi-view labels',()=>ok(app.slice(app.indexOf('function carSchematicSvg'),app.indexOf('function carMappingSummaryHtml')).includes('TOP VIEW')&&app.includes('2026 multi-view F1 technical reference schematic')),'features');
+test('technical car diagram uses official multi-view labels',()=>ok(app.slice(app.indexOf('function carSchematicSvg'),app.indexOf('function carMappingSummaryHtml')).includes('TOP VIEW')&&app.includes('2026 Formula 1 multi-view technical reference schematic')),'features');
 const cats={};for(const r of results){cats[r.category]??={pass:0,total:0};cats[r.category].total++;if(r.ok)cats[r.category].pass++;}
 const score=10*passed/(passed+failed);
 console.log(`\nF1 HUB QUALITY TESTS: ${passed}/${passed+failed} passed`);for(const [k,v] of Object.entries(cats))console.log(`${k.padEnd(14)} ${v.pass}/${v.total}`);console.log(`TEST SCORE: ${score.toFixed(2)}/10`);

@@ -22,7 +22,7 @@ const JINA = 'https://r.jina.ai/';
 const MOTORSPORT_STANDINGS = `https://www.motorsport.com/f1/standings/${YEAR}/`;
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const APP_VERSION = '1.18.0';
+const APP_VERSION = '1.19.0';
 const Q = globalThis.F1HubQuality;
 const CD = globalThis.F1HubCarDevelopment;
 const CAREER = globalThis.F1HubDriverCareer;
@@ -680,6 +680,7 @@ function setRoute(route,push=true,motion=''){ if(!route)return; const changed=ro
 
 function render(){
   clearInterval(state.countdownTimer);clearInterval(state.radarTimer);state.radarTimer=null;
+  document.body.classList.toggle('compare-route',state.route==='compare');
   if(!state.loaded){view.innerHTML='<div class="loader">Loading F1 Hub…</div>';return;}
   const r=state.route;
   if(r==='home')return renderHome(); if(r==='races')return renderRaces(); if(r==='standings')return renderStandings(); if(r==='news')return renderNews(); if(r==='more')return renderMore();
@@ -1298,25 +1299,28 @@ function parseCarPresentation(raw){
 
 function carTeamSlug(name){return String(name||'team').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');}
 const OFFICIAL_SCHEMATIC_MARKERS={
-  'front-wing':{x:43.0,y:84.5,view:'SIDE'},
-  'nose':{x:51.5,y:32.0,view:'TOP'},
-  'front-corner':{x:52.5,y:74.0,view:'FRONT'},
-  'floor-fences':{x:62.0,y:39.5,view:'TOP'},
-  'sidepod':{x:70.5,y:80.0,view:'SIDE'},
-  'floor':{x:70.5,y:87.0,view:'SIDE'},
-  'cooling':{x:73.0,y:28.5,view:'TOP'},
-  'cockpit':{x:66.5,y:33.5,view:'TOP'},
-  'rear-corner':{x:86.0,y:79.0,view:'SIDE'},
-  'rear-body':{x:20.0,y:29.0,view:'REAR'},
-  'diffuser':{x:20.0,y:42.0,view:'REAR'},
-  'beam-wing':{x:19.5,y:34.0,view:'REAR'},
-  'rear-wing':{x:18.0,y:15.5,view:'REAR'}
+  // Coordinates target the actual component on the supplied four-view 2026 reference.
+  // The numbered label is offset from this pin so it does not obscure the drawing.
+  'front-wing':{x:46.0,y:86.0,view:'SIDE',labelDx:1.2,labelDy:-3.2},
+  'nose':{x:48.0,y:35.5,view:'TOP',labelDx:1.0,labelDy:-3.0},
+  'front-corner':{x:28.5,y:80.5,view:'FRONT',labelDx:2.1,labelDy:-2.8},
+  'floor-fences':{x:63.0,y:39.0,view:'TOP',labelDx:1.3,labelDy:-3.2},
+  'sidepod':{x:67.0,y:83.5,view:'SIDE',labelDx:1.5,labelDy:-3.2},
+  'floor':{x:73.0,y:91.0,view:'SIDE',labelDx:1.2,labelDy:-3.5},
+  'cooling':{x:75.0,y:27.0,view:'TOP',labelDx:1.3,labelDy:-3.0},
+  'cockpit':{x:69.0,y:35.0,view:'TOP',labelDx:1.3,labelDy:-3.2},
+  'rear-corner':{x:88.0,y:85.0,view:'SIDE',labelDx:-2.0,labelDy:-3.0},
+  'rear-body':{x:21.0,y:32.5,view:'REAR',labelDx:1.4,labelDy:-3.2},
+  'diffuser':{x:21.0,y:43.5,view:'REAR',labelDx:1.6,labelDy:-2.8},
+  'beam-wing':{x:21.0,y:29.5,view:'REAR',labelDx:1.5,labelDy:-3.0},
+  'rear-wing':{x:21.0,y:19.3,view:'REAR',labelDx:1.4,labelDy:-3.2}
 };
 function schematicMarkerPoint(zoneId,stackIndex){
-  const base=OFFICIAL_SCHEMATIC_MARKERS[zoneId]||{x:50,y:50,view:'MAP'};
-  const offsets=[[0,0],[2.2,-2.0],[-2.2,2.0],[3.0,2.3],[-3.0,-2.3],[0,3.2]];
+  const base=OFFICIAL_SCHEMATIC_MARKERS[zoneId]||{x:50,y:50,view:'MAP',labelDx:1.3,labelDy:-3};
+  // Same-zone updates separate only slightly; the target pin stays on the real component.
+  const offsets=[[0,0],[.7,.7],[-.7,-.7],[1.0,-.6],[-1.0,.6],[0,1.1]];
   const off=offsets[stackIndex%offsets.length]||[0,0];
-  return {x:Math.max(4,Math.min(96,base.x+off[0])),y:Math.max(6,Math.min(94,base.y+off[1])),view:base.view};
+  return {x:Math.max(4,Math.min(96,base.x+off[0])),y:Math.max(6,Math.min(94,base.y+off[1])),view:base.view,labelDx:base.labelDx||1.3,labelDy:base.labelDy||-3};
 }
 function carSchematicSvg(team,updates){
   const accent=teamColour(team);
@@ -1328,7 +1332,7 @@ function carSchematicSvg(team,updates){
       const idx=perZoneCount[z.id]||0;perZoneCount[z.id]=idx+1;
       const pt=schematicMarkerPoint(z.id,idx),tag=`${u.mapIndex}`;
       const target=`car-${carTeamSlug(team)}-${u.mapIndex}`;
-      return `<button class="schematic-marker" style="left:${pt.x}%;top:${pt.y}%;--car-accent:${accent}" onclick="focusCarUpdate('${target}')" aria-label="Update ${tag}: ${esc(z.label)} (${pt.view} view)" title="Update ${tag}: ${esc(z.label)} · ${pt.view} view"><span>${tag}</span></button>`;
+      return `<button class="schematic-marker schematic-pin-marker" style="left:${pt.x}%;top:${pt.y}%;--car-accent:${accent};--label-dx:${pt.labelDx}%;--label-dy:${pt.labelDy}%" onclick="focusCarUpdate('${target}')" aria-label="Update ${tag}: ${esc(z.label)} (${pt.view} view)" title="Update ${tag}: ${esc(z.label)} · ${pt.view} view"><i aria-hidden="true"></i><span>${tag}</span></button>`;
     });
   }).join('');
   return `<div class="car-schematic official-schematic" role="img" aria-label="Official-style 2026 Formula 1 reference schematic showing mapped update locations for ${esc(team)}" style="--car-accent:${accent}">
@@ -1339,7 +1343,7 @@ function carSchematicSvg(team,updates){
 }
 function carMappingSummaryHtml(team,updates){
   const summary=CD?.mappingSummary(updates)||{coverage:0,known:0,total:updates.length,high:0,mapped:updates.map((u,i)=>({...u,map:{id:'unmapped',label:'Location not mapped',confidence:'LOW'},mapIndex:i+1}))};
-  return `<div class="car-map-card"><div class="car-map-head"><div><div class="eyebrow">UPDATE LOCATION MAP</div><div class="card-title">${esc(team)} schematic</div></div><span class="map-coverage ${summary.coverage===100?'complete':''}">${summary.known}/${summary.total} mapped</span></div>${carSchematicSvg(team,updates)}<div class="map-note">Component locations are mapped from the FIA component name/description onto the 2026 multi-view F1 technical reference schematic. It shows approximate physical location, not team CAD geometry.</div></div>`;
+  return `<div class="car-map-card"><div class="car-map-head"><div><div class="eyebrow">UPDATE LOCATION MAP</div><div class="card-title">${esc(team)} schematic</div></div><span class="map-coverage ${summary.coverage===100?'complete':''}">${summary.known}/${summary.total} mapped</span></div>${carSchematicSvg(team,updates)}<div class="map-note">The small coloured pin marks the component location; its numbered bubble is offset so it does not cover the technical drawing. Locations come from the FIA component name/description and are approximate, not team CAD geometry.</div></div>`;
 }
 function focusCarUpdate(id){const el=document.getElementById(id);if(!el)return;el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});el.classList.remove('update-flash');void el.offsetWidth;el.classList.add('update-flash');setTimeout(()=>el.classList.remove('update-flash'),1000);}
 function filterCarUpdateTeams(team){document.querySelectorAll('[data-update-team]').forEach(el=>el.classList.toggle('hidden',team!=='ALL'&&el.dataset.updateTeam!==team));document.querySelectorAll('[data-car-filter]').forEach(b=>b.classList.toggle('active',b.dataset.carFilter===team));}
@@ -1361,15 +1365,64 @@ function carUpdatesHtml(parsed,doc){
   return '<div class="card"><div class="empty">No update rows could be read from the FIA document.</div></div>';
 }
 
+function fiaCarPresentationEventNames(r){
+  const aliases={
+    'Chinese Grand Prix':['Grand Prix of China','Chinese Grand Prix'],
+    'Spanish Grand Prix':['Spanish Grand Prix','Barcelona-Catalunya Grand Prix'],
+    'Barcelona-Catalunya Grand Prix':['Barcelona-Catalunya Grand Prix','Spanish Grand Prix'],
+    'United States Grand Prix':['United States Grand Prix','US Grand Prix'],
+    'Mexico City Grand Prix':['Mexico City Grand Prix','Mexican Grand Prix'],
+    'São Paulo Grand Prix':['São Paulo Grand Prix','Sao Paulo Grand Prix','Brazilian Grand Prix']
+  };
+  return [...new Set([r?.raceName,...(aliases[r?.raceName]||[])].filter(Boolean))];
+}
+function fiaDirectCarPresentationUrls(r){
+  const slugName=n=>String(n||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/&/g,'and').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  return fiaCarPresentationEventNames(r).map(n=>`https://www.fia.com/system/files/decision-document/${YEAR}_${slugName(n)}_-_car_presentation_submissions.pdf`);
+}
+function findAnyCarPresentationLink(raw){
+  const lines=String(raw||'').split('\n');
+  for(const line of lines){
+    if(!/Car Presentation Submissions/i.test(line))continue;
+    const m=line.match(/\[([^\]]*Car Presentation Submissions[^\]]*)\]\(([^)]+)\)/i);
+    if(m)return {title:m[1],url:absoluteFiaUrl(m[2]),score:1};
+  }
+  return null;
+}
+async function discoverHistoricalCarPresentation(r){
+  // FIA keeps event-specific decision-document pages after a weekend has left the main documents page.
+  for(const eventName of fiaCarPresentationEventNames(r)){
+    const eventUrl=`https://www.fia.com/documents/championship/event/${encodeURIComponent(eventName)}`;
+    try{
+      const raw=await fetchText(JINA+eventUrl,`fia-event-${YEAR}-${r.round}-${eventName}`,7*24*3600e3);
+      const found=findCarPresentationLink(raw,r)||findAnyCarPresentationLink(raw);
+      if(found)return {...found,eventUrl,archive:true};
+    }catch{}
+  }
+  // FIA decision PDFs use a predictable filename. Probe those only after the event-page discovery route.
+  for(const url of fiaDirectCarPresentationUrls(r)){
+    try{
+      const raw=await fetchText(JINA+url,`fia-car-probe-${YEAR}-${r.round}-${url.split('/').pop()}`,30*24*3600e3);
+      if(/Car Presentation Submissions|FIA FORMULA 1 WORLD CHAMPIONSHIP/i.test(raw))return {title:'Car Presentation Submissions',url,score:1,archive:true};
+    }catch{}
+  }
+  return null;
+}
 async function getCarUpdateDoc(r){
   const cached=state.carUpdateDocs[String(r.round)];if(cached)return cached;
-  const text=await fetchText(JINA+FIA_DOCS,'fia-docs',20*60e3);
-  const doc=findCarPresentationLink(text,r);
+  let doc=null;
+  // The main FIA documents page is fastest for the current weekend.
+  try{
+    const text=await fetchText(JINA+FIA_DOCS,'fia-docs',20*60e3);
+    doc=findCarPresentationLink(text,r);
+  }catch{}
+  // Historical rounds live on their FIA event archive pages, not the current documents landing page.
+  if(!doc)doc=await discoverHistoricalCarPresentation(r);
   if(doc)state.carUpdateDocs[String(r.round)]=doc;
   return doc;
 }
 async function drawCarUpdates(root,r){
-  root.innerHTML='<div class="loader">Checking FIA car presentation submissions…</div>';
+  root.innerHTML=`<div class="loader">${raceSessionDone(r)?'Checking FIA event archive…':'Checking FIA car presentation submissions…'}</div>`;
   try{
     const doc=await getCarUpdateDoc(r);
     if(!doc)throw new Error('not-published');
@@ -1377,7 +1430,7 @@ async function drawCarUpdates(root,r){
     const parsed=parseCarPresentation(raw);
     root.innerHTML=titleBlock('TECHNICAL','Car Updates')+carUpdatesHtml(parsed,doc);
   }catch{
-    root.innerHTML=`${titleBlock('TECHNICAL','Car Updates')}<div class="card"><div class="empty">A Car Presentation Submission could not be matched to this weekend yet. The FIA normally publishes it around the start of track running.</div></div><div class="spacer"></div><div class="actions"><a class="external-btn" target="_blank" rel="noopener" href="${FIA_DOCS}">FIA DOCUMENTS ↗</a></div>`;
+    root.innerHTML=`${titleBlock('TECHNICAL','Car Updates')}<div class="card"><div class="empty">A Car Presentation Submission could not be matched to this weekend. F1 Hub checked both the current FIA documents page and the FIA event archive.</div></div><div class="spacer"></div><div class="actions"><a class="external-btn" target="_blank" rel="noopener" href="${FIA_DOCS}">FIA DOCUMENTS ↗</a></div>`;
   }
 }
 function renderUpdates(){
@@ -1385,9 +1438,9 @@ function renderUpdates(){
   const available=[...state.schedule].filter(r=>{const first=sessions(r)[0]?.iso;return !!first&&new Date(first).getTime()<=now;}).reverse();
   const rows=available.map(r=>{
     const status=raceSessionDone(r)?'PAST WEEKEND':'CURRENT WEEKEND';
-    return `<div class="card clickable development-race" onclick="setRoute('carupdates:${r.round}')"><div class="round-box"><small>ROUND</small><b>${esc(r.round)}</b></div><div><div class="race-name">${flag(r.Circuit.Location.country)} ${esc(r.raceName)}</div><div class="race-place">${esc(r.Circuit.circuitName)} · ${fmtDate(raceIso(r),{day:'numeric',month:'short'})}</div></div><div class="development-status">${status}<b>UPDATES ›</b></div></div>`;
+    return `<div class="card clickable development-race" onclick="setRoute('carupdates:${r.round}')"><div class="round-box"><small>ROUND</small><b>${esc(r.round)}</b></div><div><div class="race-name">${flag(r.Circuit.Location.country)} ${esc(r.raceName)}</div><div class="race-place">${esc(r.Circuit.circuitName)} · ${fmtDate(raceIso(r),{day:'numeric',month:'short'})}</div></div><div class="development-status">${status}<b>${raceSessionDone(r)?'FIA ARCHIVE ›':'UPDATES ›'}</b></div></div>`;
   }).join('');
-  view.innerHTML=titleBlock(`${YEAR} SEASON`,'Car Development')+`<div class="card development-intro"><div class="eyebrow">OFFICIAL FIA SUBMISSIONS · VISUALISED</div><div class="card-title" style="margin-top:5px">See where every declared update sits on the car</div><div class="muted" style="margin-top:5px">F1 Hub reads the FIA Car Presentation Submission, keeps the team's own explanation, and maps recognised components onto an official-style 2026 FIA reference schematic. Tap a numbered marker to jump to the corresponding update.</div>${favouriteTeamName()?`<div class="development-my-team" style="--team:${teamColour(favouriteTeamName())}"><i></i><span>MY TEAM · ${esc(favouriteTeamName())} will be shown first</span></div>`:''}</div><div class="spacer"></div>${rows?`<div class="grid">${rows}</div>`:'<div class="empty">No race weekend has started yet this season.</div>'}<div class="source-note">The FIA submission is the primary technical source. Diagram locations are broad component-level maps, not team CAD geometry. The current weekend may remain unavailable until its Car Presentation Submission is published.</div>`;
+  view.innerHTML=titleBlock(`${YEAR} SEASON`,'Car Development')+`<div class="card development-intro"><div class="eyebrow">OFFICIAL FIA SUBMISSIONS · VISUALISED</div><div class="card-title" style="margin-top:5px">See where every declared update sits on the car</div><div class="muted" style="margin-top:5px">F1 Hub reads the FIA Car Presentation Submission, keeps the team's own explanation, and maps recognised components onto an official-style 2026 FIA reference schematic. Tap a numbered marker to jump to the corresponding update.</div>${favouriteTeamName()?`<div class="development-my-team" style="--team:${teamColour(favouriteTeamName())}"><i></i><span>MY TEAM · ${esc(favouriteTeamName())} will be shown first</span></div>`:''}</div><div class="spacer"></div>${rows?`<div class="grid">${rows}</div>`:'<div class="empty">No race weekend has started yet this season.</div>'}<div class="source-note">The FIA submission is the primary technical source. Past rounds are resolved through FIA event archives; the current weekend may remain unavailable until its Car Presentation Submission is published. Diagram locations are component-level maps, not team CAD geometry.</div>`;
 }
 async function renderCarUpdates(round){
   const r=state.schedule.find(x=>String(x.round)===String(round));if(!r)return setRoute('updates');
@@ -2074,12 +2127,19 @@ function setupSwipeNavigation(){
     requestAnimationFrame(()=>requestAnimationFrame(()=>{if(id!==visualSerial)return;view.style.transition='transform .15s cubic-bezier(.16,.9,.22,1)';view.style.transform='translate3d(0,0,0)';if(snapshot){snapshot.style.transition='transform .15s cubic-bezier(.4,0,.2,1),opacity .15s ease';snapshot.style.transform=`translate3d(${dir*width}px,0,0)`;snapshot.style.opacity='0';}finishTimer=setTimeout(()=>{if(id!==visualSerial)return;if(snapshot){snapshot.remove();snapshot=null;}view.style.transition='none';view.style.transform='';},165);}));
     if(route==='news'&&!state.news.length&&!state.newsRefreshing)setTimeout(()=>refreshNewsOnly(true),0);
   };
+  const swipeBlockedTarget=el=>{
+    const interactive=el?.closest?.('button,input,select,textarea,.tabs,.news-source-tabs,.weather-session-tabs,.leaflet-container,.car-schematic [data-no-swipe],[data-no-swipe]');
+    // More is made almost entirely from menu buttons: let a horizontal drag start on those cards.
+    if(interactive?.classList?.contains('menu-card'))return false;
+    return !!interactive;
+  };
+  window.addEventListener('click',e=>{if(Number(window.__f1SuppressSwipeClickUntil||0)>performance.now()){const c=e.target?.closest?.('.menu-card,.news-link');if(c){e.preventDefault();e.stopPropagation();}}},true);
   window.addEventListener('touchstart',e=>{
-    if(!TOP_LEVEL_ROUTES.includes(state.route)||e.touches?.length!==1)return;if(e.target?.closest?.('button,input,select,textarea,.tabs,.news-source-tabs,.weather-session-tabs,.leaflet-container,.car-schematic [data-no-swipe],[data-no-swipe]'))return;
+    if(!TOP_LEVEL_ROUTES.includes(state.route)||e.touches?.length!==1)return;if(swipeBlockedTarget(e.target))return;
     stopVisual();const p=e.touches[0];startX=lastX=p.clientX;startY=p.clientY;lastT=performance.now();velocityX=0;tracking=true;horizontal=false;target=null;
   },{passive:true});
   window.addEventListener('touchmove',e=>{if(!tracking||!e.touches?.length)return;const p=e.touches[0],dx=p.clientX-startX,dy=p.clientY-startY;if(!horizontal){if(Math.abs(dx)<5&&Math.abs(dy)<5)return;if(Math.abs(dx)<=Math.abs(dy)*1.08){tracking=false;return;}horizontal=true;window.__f1SwipeActive=true;view.classList.add('swipe-dragging');}e.preventDefault();target=swipeTarget(state.route,dx);const now=performance.now(),moveDt=Math.max(6,now-lastT);velocityX=.65*velocityX+.35*((p.clientX-lastX)/moveDt);lastX=p.clientX;lastT=now;paint(dx,target);},{passive:false});
-  window.addEventListener('touchend',e=>{if(!tracking){if(horizontal)cancelSwipe();return;}const p=e.changedTouches?.[0],endX=p?.clientX??lastX,endY=p?.clientY??startY,dx=endX-startX,dy=endY-startY,width=Math.max(320,window.innerWidth),quickTarget=target||swipeTarget(state.route,dx),elapsed=Math.max(1,performance.now()-lastT),velocityGuess=Math.max(Math.abs(velocityX),Math.abs(endX-lastX)/elapsed,Math.abs(dx)/Math.max(1,performance.now()-(lastT-16))),mostlyHorizontal=Math.abs(dx)>Math.abs(dy)*1.04,commit=quickTarget&&mostlyHorizontal&&(Math.abs(dx)>=Math.min(78,width*.17)||(Math.abs(dx)>=24&&velocityGuess>.28));if(commit)commitSwipe(quickTarget,dx);else cancelSwipe();},{passive:true});
+  window.addEventListener('touchend',e=>{if(!tracking){if(horizontal)cancelSwipe();return;}const p=e.changedTouches?.[0],endX=p?.clientX??lastX,endY=p?.clientY??startY,dx=endX-startX,dy=endY-startY,width=Math.max(320,window.innerWidth),quickTarget=target||swipeTarget(state.route,dx),elapsed=Math.max(1,performance.now()-lastT),velocityGuess=Math.max(Math.abs(velocityX),Math.abs(endX-lastX)/elapsed,Math.abs(dx)/Math.max(1,performance.now()-(lastT-16))),mostlyHorizontal=Math.abs(dx)>Math.abs(dy)*(state.route==='more'?0.92:1.04),distanceThreshold=Math.min(state.route==='more'?58:78,width*(state.route==='more'?.13:.17)),flickThreshold=state.route==='more'?.22:.28,commit=quickTarget&&mostlyHorizontal&&(Math.abs(dx)>=distanceThreshold||(Math.abs(dx)>=20&&velocityGuess>flickThreshold));if(commit){window.__f1SuppressSwipeClickUntil=performance.now()+360;commitSwipe(quickTarget,dx);}else cancelSwipe();},{passive:true});
   window.addEventListener('touchcancel',()=>{if(tracking||horizontal)cancelSwipe();},{passive:true});
 }
 function enhanceAccessibility(){

@@ -399,3 +399,19 @@ body.launch-revealing #app-shell{opacity:1;transform:none;filter:none}
 .news-more-wrap{display:flex;justify-content:center;padding:16px 0 4px}.news-more-wrap .external-btn{min-width:210px}
 @media(max-width:620px){.official-schematic{padding:8px}.official-schematic-labels span{font-size:6px;padding:3px 5px}.official-schematic-labels span:nth-child(2),.official-schematic-labels span:nth-child(4){left:41%}.schematic-marker{width:27px;height:27px}}
 .swipe-news-snapshot{display:flex;align-items:flex-start;justify-content:center;padding-top:42px;background:#090909}.swipe-news-ghost{width:min(92%,720px);display:grid;gap:12px}.swipe-news-ghost small{color:var(--red);font-size:9px;font-weight:1000;letter-spacing:1.4px}.swipe-news-ghost b{font-size:34px;line-height:1}.swipe-news-ghost i{display:block;height:104px;border:1px solid #252525;border-radius:20px;background:linear-gradient(110deg,#151515,#0e0e0e 58%,#131313)}
+\n\n/* v1.19.0 phone-feedback fixes */
+/* Technical markers use a precise pin + small offset number rather than a large badge over the car. */
+.schematic-pin-marker{position:absolute;z-index:4;transform:none;width:1px;height:1px;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible;cursor:pointer;color:#fff}
+.schematic-pin-marker:before{content:"";position:absolute;width:30px;height:30px;left:-15px;top:-15px;border-radius:50%;background:transparent}
+.schematic-pin-marker>i{position:absolute;left:-3px;top:-3px;width:7px;height:7px;border-radius:50%;background:var(--car-accent);border:1.5px solid #fff;box-shadow:0 0 0 2px color-mix(in srgb,var(--car-accent) 28%,transparent),0 0 7px color-mix(in srgb,var(--car-accent) 65%,transparent)}
+.schematic-pin-marker:after{content:"";position:absolute;left:3px;top:-2px;width:12px;height:1px;background:color-mix(in srgb,var(--car-accent) 76%,#fff);transform:rotate(-34deg);transform-origin:left center;opacity:.9}
+.schematic-pin-marker>span{position:absolute;left:10px;top:-19px;width:19px;height:19px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--car-accent) 88%,#151515);border:1.5px solid #fff;box-shadow:0 2px 7px #0009;font-size:8.5px;line-height:1;font-weight:1000;color:#fff}
+.schematic-pin-marker:hover,.schematic-pin-marker:focus-visible{transform:none;box-shadow:none}.schematic-pin-marker:hover>span,.schematic-pin-marker:focus-visible>span{transform:scale(1.13)}
+/* A real inner scroller prevents Driver Compare from being trapped by the document/gesture layer on Android PWAs. */
+body.compare-route{overflow:hidden;overscroll-behavior:none}
+body.compare-route .view{height:calc(100dvh - 66px);overflow:hidden;padding-bottom:0}
+.compare-page{height:100%;overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;touch-action:pan-y!important;padding-bottom:calc(110px + env(safe-area-inset-bottom));scrollbar-width:none}
+.compare-page::-webkit-scrollbar{display:none}.compare-page *:not(select):not(button):not(input){touch-action:pan-y}
+/* More cards are swipe surfaces as well as tap targets. */
+.menu-card{touch-action:pan-y pinch-zoom}
+@media(max-width:620px){.schematic-pin-marker>span{width:18px;height:18px;left:9px;top:-18px;font-size:8px}.schematic-pin-marker:before{width:34px;height:34px;left:-17px;top:-17px}}

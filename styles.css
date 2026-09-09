@@ -433,3 +433,27 @@ body.compare-route,.compare-page,#cmp-out,.compare-deck,.compare-deck>*,.compare
 .driver-photo,.profile-photo-holder img,.compare-driver-photo{image-rendering:auto;transform:translateZ(0);backface-visibility:hidden}
 .driver-photo-holder,.driver-photo{height:132px}.profile-photo-holder,.profile-photo-holder img{height:265px}
 @media(max-width:620px){.schematic-pin-marker>span{width:15px;height:15px;left:9px;top:-15px;font-size:7px}.compare-radar{aspect-ratio:1/1}.driver-photo-holder,.driver-photo{height:128px}.profile-photo-holder,.profile-photo-holder img,.profile-avatar{height:225px}}
+
+/* v1.21.0 phone-QA fixes */
+/* Driver Compare uses the document's native scroller. The previous nested 100dvh scroller
+   could leave a large unpainted/dead area on Android PWAs. */
+body.compare-route{overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior-y:contain!important}
+body.compare-route .view{height:auto!important;min-height:calc(100dvh - 66px)!important;overflow:visible!important;padding-bottom:calc(112px + env(safe-area-inset-bottom))!important}
+body.compare-route .compare-page{height:auto!important;min-height:0!important;overflow:visible!important;padding-bottom:8px!important;touch-action:pan-y!important;overscroll-behavior-y:auto!important}
+body.compare-route #cmp-out{overflow:visible!important;min-height:0!important}
+
+/* Immersive circuit experience */
+.circuit-experience-card{overflow:hidden;padding:14px;background:linear-gradient(145deg,#131313,#0b0b0b)}
+.circuit-experience-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+.circuit-experience-head .actions{justify-content:flex-end;flex-wrap:nowrap}
+.circuit-stage{position:relative;height:min(58vh,520px);min-height:390px;border:1px solid #242424;border-radius:20px;overflow:hidden;background:radial-gradient(circle at 50% 50%,#171717,#080808 68%)}
+.circuit-stage:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:2;background:linear-gradient(180deg,rgba(0,0,0,.04),transparent 68%,rgba(0,0,0,.34))}
+.circuit-viewport{position:absolute;inset:0;display:grid;place-items:center;overflow:hidden;padding:12px;touch-action:pan-y}
+.circuit-immersive-svg{width:100%;height:100%;display:block;filter:drop-shadow(0 0 14px rgba(255,255,255,.10));overflow:visible}
+.circuit-immersive-svg path,.circuit-immersive-svg polyline,.circuit-immersive-svg polygon{vector-effect:non-scaling-stroke}
+.circuit-turn-markers{cursor:pointer}.circuit-turn-marker{cursor:pointer;transition:.2s opacity}.circuit-turn-marker circle{fill:#111;stroke:var(--red);stroke-width:2;vector-effect:non-scaling-stroke;filter:drop-shadow(0 0 5px color-mix(in srgb,var(--red) 54%,transparent))}.circuit-turn-marker text{fill:#fff;font-size:11px;font-weight:1000;text-anchor:middle;paint-order:stroke;stroke:#000;stroke-width:2px;stroke-linejoin:round}.circuit-turn-marker.active circle{fill:var(--red);stroke:#fff;filter:drop-shadow(0 0 10px color-mix(in srgb,var(--red) 78%,transparent))}.circuit-turn-marker.active text{fill:#fff}
+.circuit-lap-hud{position:absolute;left:13px;bottom:13px;z-index:4;display:flex;flex-direction:column;gap:2px;max-width:70%;padding:9px 11px;border-radius:12px;background:rgba(9,9,9,.84);border:1px solid #343434;backdrop-filter:blur(10px);pointer-events:none}.circuit-lap-hud b{font-size:12px;letter-spacing:.6px}.circuit-lap-hud span{font-size:8px;color:#9a9a9a;font-weight:850;letter-spacing:.35px}
+.circuit-turn-strip{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:10px 2px 3px;scroll-snap-type:x proximity}.circuit-turn-strip::-webkit-scrollbar{display:none}
+.circuit-turn-card{flex:0 0 116px;display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;gap:0 7px;align-items:center;text-align:left;appearance:none;background:#0d0d0d;border:1px solid #2b2b2b;border-radius:14px;padding:9px 10px;color:#fff;min-height:61px;scroll-snap-align:center;cursor:pointer;transition:.18s transform,.18s border-color,.18s background}.circuit-turn-card small{grid-row:1;font-size:7px;color:#777;font-weight:950;letter-spacing:1px}.circuit-turn-card b{grid-row:2;font-size:22px;line-height:.9}.circuit-turn-card span{grid-column:2;grid-row:1/3;font-size:8px;color:#8d8d8d;font-weight:850;line-height:1.35}.circuit-turn-card.active{border-color:color-mix(in srgb,var(--red) 68%,#333);background:color-mix(in srgb,var(--red) 9%,#0d0d0d);transform:translateY(-2px)}.circuit-turn-card.static{cursor:default}
+.circuit-guide-note{font-size:8px;color:#727272;line-height:1.4;margin:7px 2px 0}.circuit-fallback-img{display:block;width:100%;height:100%;object-fit:contain;padding:22px;filter:drop-shadow(0 0 12px rgba(255,255,255,.08))}.circuit-stage-fallback{color:#777;font-size:11px;text-align:center}
+@media(max-width:620px){.circuit-experience-card{padding:10px}.circuit-experience-head{align-items:center}.circuit-experience-head .actions{gap:5px}.circuit-experience-head .mini-btn.wide{min-width:94px;padding:0 8px}.circuit-stage{height:52vh;min-height:330px}.circuit-viewport{padding:7px}.circuit-turn-card{flex-basis:108px}.circuit-lap-hud{left:9px;bottom:9px}}

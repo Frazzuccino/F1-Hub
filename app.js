@@ -22,7 +22,7 @@ const JINA = 'https://r.jina.ai/';
 const MOTORSPORT_STANDINGS = `https://www.motorsport.com/f1/standings/${YEAR}/`;
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const APP_VERSION = '1.19.0';
+const APP_VERSION = '1.20.0';
 const Q = globalThis.F1HubQuality;
 const CD = globalThis.F1HubCarDevelopment;
 const CAREER = globalThis.F1HubDriverCareer;
@@ -91,7 +91,8 @@ const state = {
   route:'home', schedule:[], drivers:[], constructors:[], photos:{}, wikiPhotos:{}, news:[], newsSource:'ALL', newsVisibleCount:28, spoilerNewsRevealedRound:null, standingsSpoilerRevealedRound:null,
   penaltyPoints:{...FALLBACK_POINTS}, reprimands:{...FALLBACK_REPRIMANDS}, stewardDocs:{}, historyYear:YEAR-1, historyCache:{}, carUpdateDocs:{},
   loaded:false, refreshing:false, newsRefreshing:false, newsUpdatedAt:0, newsLatestArticleAt:0, standingsRefreshing:false, standingsUpdatedAt:0, driverStandingsRound:0, constructorStandingsRound:0, standingsDerivedRound:0, installPrompt:window.__f1InstallPrompt||null, justInstalled:false, countdownTimer:null, dataStamp:null, raceWinners:{}, raceHistory:null, radarTimer:null,
-  dataHealth:{}, favouriteDriver:localStorage.getItem('f1hub:favourite-driver')||'', favouriteTeam:localStorage.getItem('f1hub:favourite-team')||'', personalTheme:localStorage.getItem('f1hub:personal-theme')!=='off', lastRaceInsights:{}, updateAvailable:false, routeMotionPending:true, driverCareerCache:{}, weatherSessionByRound:{}, calendarExpandedRound:'', routeMotionDirection:''
+  dataHealth:{}, favouriteDriver:localStorage.getItem('f1hub:favourite-driver')||'', favouriteTeam:localStorage.getItem('f1hub:favourite-team')||'', personalTheme:localStorage.getItem('f1hub:personal-theme')!=='off', lastRaceInsights:{}, updateAvailable:false, routeMotionPending:true, driverCareerCache:{}, weatherSessionByRound:{}, calendarExpandedRound:'', routeMotionDirection:'',
+  compareA:'', compareB:'', compareResultHtml:'', compareBusy:false
 };
 const view = document.getElementById('view');
 
@@ -282,7 +283,7 @@ async function loadWikipediaPhotos(force=false){
   const wanted=state.drivers.map(s=>({id:s.Driver.driverId,titles:wikiPhotoCandidates(s.Driver)})).filter(x=>x.titles.length); if(!wanted.length)return;
   const key=`wiki-photos-${YEAR}`; if(force)localStorage.removeItem('f1hub:'+key);
   const primaryTitles=[...new Set(wanted.map(x=>x.titles[0]).filter(Boolean))];
-  const qs=new URLSearchParams({action:'query',format:'json',origin:'*',prop:'pageimages',piprop:'thumbnail',pithumbsize:'700',redirects:'1',titles:primaryTitles.join('|')});
+  const qs=new URLSearchParams({action:'query',format:'json',origin:'*',prop:'pageimages',piprop:'thumbnail',pithumbsize:'1400',redirects:'1',titles:primaryTitles.join('|')});
   try{
     const j=await fetchJSON(`${WIKI_API}?${qs.toString()}`,key,force?1:24*3600e3);
     const pages=Object.values(j?.query?.pages||{});
@@ -302,8 +303,39 @@ async function loadWikipediaPhotos(force=false){
     state.wikiPhotos=resolved;
   }catch{}
 }
-function driverPhotoUrls(s){ const d=s?.Driver||s; const of=state.photos[driverCode(d)]?.headshot_url; const wiki=state.wikiPhotos[d?.driverId]; const special=/lindblad/i.test(`${d?.driverId||''} ${d?.givenName||''} ${d?.familyName||''}`)?STATIC_DRIVER_PHOTOS.lindblad:null; return [...new Set([special,of,wiki].filter(Boolean))]; }
-function driverPhotoError(img){ const fb=img.dataset.fallback; if(fb){img.dataset.fallback='';img.src=fb;return;} const holder=img.closest('.driver-photo-holder, .profile-photo-holder'); if(holder){holder.innerHTML=`<div class="avatar ${holder.classList.contains('profile-photo-holder')?'profile-avatar':''}">${esc(img.dataset.code||'---')}</div>`;} else {img.style.display='none';} }
+function highResDriverPhoto(url){
+  const u=String(url||'');
+  if(!u)return '';
+  // OpenF1 commonly returns Formula1.com's compact 1-column DAM rendition.
+  // Request a larger responsive rendition first while retaining the original URL as fallback.
+  if(/\.transform\/1col\/image\./i.test(u))return u.replace(/\.transform\/1col\/image\./i,'.transform/4col/image.');
+  return u;
+}
+function originalDriverPhoto(url){
+  return String(url||'').replace(/\.transform\/[^/]+\/image\.(png|jpe?g|webp)(?:\?.*)?$/i,'');
+}
+function driverPhotoUrls(s){
+  const d=s?.Driver||s;
+  const of=state.photos[driverCode(d)]?.headshot_url;
+  const ofHi=highResDriverPhoto(of),ofOriginal=originalDriverPhoto(of);
+  const wiki=state.wikiPhotos[d?.driverId];
+  const special=/lindblad/i.test(`${d?.driverId||''} ${d?.givenName||''} ${d?.familyName||''}`)?STATIC_DRIVER_PHOTOS.lindblad:null;
+  return [...new Set([special,ofHi,ofOriginal,of,wiki].filter(Boolean))];
+}
+function driverPhotoAttrs(imgs,code){
+  const src=imgs?.[0]||'',fallbacks=(imgs||[]).slice(1);
+  return src?`src="${esc(src)}" data-fallbacks="${esc(JSON.stringify(fallbacks))}" data-code="${esc(code)}"`:'';
+}
+function driverPhotoError(img){
+  let list=[];
+  try{list=JSON.parse(img.dataset.fallbacks||'[]')}catch{}
+  const next=list.shift();
+  if(next){img.dataset.fallbacks=JSON.stringify(list);img.src=next;return;}
+  const old=img.dataset.fallback;
+  if(old){img.dataset.fallback='';img.src=old;return;}
+  const holder=img.closest('.driver-photo-holder, .profile-photo-holder');
+  if(holder){holder.innerHTML=`<div class="avatar ${holder.classList.contains('profile-photo-holder')?'profile-avatar':''}">${esc(img.dataset.code||'---')}</div>`;} else {img.style.display='none';}
+}
 window.driverPhotoError=driverPhotoError;
 
 function rssCacheBust(url){
@@ -471,7 +503,7 @@ async function loadBase(force=false){
     state.loaded=state.schedule.length>0||state.drivers.length>0;
     state.dataStamp=new Date();
     applyPersonalTheme();
-    render();
+    if(state.route!=='compare'||!document.querySelector('.compare-page'))render();
     if(state.routeMotionPending){state.routeMotionPending=false;requestAnimationFrame(animateRouteContent);}
 
     standingsTask=refreshPostRaceStandings().then(()=>{if(['standings','home','drivers','teams'].includes(state.route))render();}).catch(()=>{});
@@ -480,7 +512,7 @@ async function loadBase(force=false){
     if(force)await Promise.allSettled([newsTask,standingsTask,wikiTask]);
   } finally {
     state.refreshing=false;
-    if(force&&state.loaded)render();
+    if(force&&state.loaded&&(state.route!=='compare'||!document.querySelector('.compare-page')))render();
   }
   refreshPenaltyData();
   preloadRaceWinners(force);
@@ -900,7 +932,7 @@ function renderDataHealth(){
 window.addRaceWeekendCalendar=addRaceWeekendCalendar;window.shareText=shareText;
 
 function renderDrivers(){ view.innerHTML=titleBlock(`${YEAR} GRID`,'Drivers')+`<div class="driver-grid">${state.drivers.map(s=>driverCard(s)).join('')}</div>`; }
-function driverCard(s){ const team=s.Constructors?.at(-1)?.name||'',imgs=driverPhotoUrls(s),img=imgs[0],fb=imgs[1]||'';return `<div class="card driver-card clickable ${isFavouriteDriver(s)?'is-favourite':''}" onclick="setRoute('driver:${s.Driver.driverId}')"><i class="team-strip" style="background:${teamColour(team)}"></i><div class="driver-photo-holder">${img?`<img class="driver-photo" src="${esc(img)}" data-fallback="${esc(fb)}" data-code="${esc(driverCode(s.Driver))}" onerror="driverPhotoError(this)" alt="${esc(fullName(s.Driver))}" loading="lazy">`:`<div class="avatar">${esc(driverCode(s.Driver))}</div>`}</div><div class="driver-copy"><div class="driver-code">#${esc(s.Driver.permanentNumber||'—')} · ${esc(driverCode(s.Driver))}</div><div class="driver-full">${esc(fullName(s.Driver))}</div><div class="driver-bottom"><span>${esc(team)}</span><span><b>${esc(s.points)}</b> pts</span></div></div></div>`; }
+function driverCard(s){ const team=s.Constructors?.at(-1)?.name||'',imgs=driverPhotoUrls(s),img=imgs[0];return `<div class="card driver-card clickable ${isFavouriteDriver(s)?'is-favourite':''}" onclick="setRoute('driver:${s.Driver.driverId}')"><i class="team-strip" style="background:${teamColour(team)}"></i><div class="driver-photo-holder">${img?`<img class="driver-photo" ${driverPhotoAttrs(imgs,driverCode(s.Driver))} onerror="driverPhotoError(this)" alt="${esc(fullName(s.Driver))}" loading="lazy">`:`<div class="avatar">${esc(driverCode(s.Driver))}</div>`}</div><div class="driver-copy"><div class="driver-code">#${esc(s.Driver.permanentNumber||'—')} · ${esc(driverCode(s.Driver))}</div><div class="driver-full">${esc(fullName(s.Driver))}</div><div class="driver-bottom"><span>${esc(team)}</span><span><b>${esc(s.points)}</b> pts</span></div></div></div>`; }
 function careerPageOffsets(total,pageSize=100){return CAREER?.pageOffsets(total,pageSize)||[0];}
 function buildDriverCareer(races,expectedTotal=0){return CAREER?.build(races,expectedTotal)||{starts:0,wins:0,podiums:0,best:null,seasons:[],teams:[],expectedTotal:Number(expectedTotal||0),complete:false};}
 function attachDriverCareerStandings(career,standings){return CAREER?.attachStandings?CAREER.attachStandings(career,standings):career;}
@@ -946,7 +978,7 @@ async function loadDriverCareerInto(id){
     const live=document.getElementById('driver-career');if(live)live.innerHTML=driverCareerHtml(career);
   }catch{if(document.getElementById('driver-career'))root.innerHTML='<div class="card"><div class="empty">Career history could not be loaded right now.</div></div>';}
 }
-function renderDriver(id){ const s=state.drivers.find(x=>x.Driver.driverId===id);if(!s)return setRoute('drivers');const d=s.Driver,team=s.Constructors?.at(-1)?.name||'',imgs=driverPhotoUrls(s),img=imgs[0],fb=imgs[1]||'';view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('drivers')">← DRIVERS</button></div><div class="spacer"></div><div class="card driver-profile-card" style="overflow:hidden"><div class="driver-profile-hero" style="border-left-color:${teamColour(team)}"><div class="driver-profile-copy"><div class="eyebrow">#${esc(d.permanentNumber||'—')} · ${esc(driverCode(d))}</div><h1>${esc(fullName(d))}</h1><div class="muted">${esc(d.nationality)} · ${esc(team)}</div></div><div class="profile-photo-holder">${img?`<img src="${esc(img)}" data-fallback="${esc(fb)}" data-code="${esc(driverCode(d))}" onerror="driverPhotoError(this)" alt="${esc(fullName(d))}">`:`<div class="avatar profile-avatar">${esc(driverCode(d))}</div>`}</div></div><div class="driver-profile-stats"><div class="facts"><div class="fact"><b>${esc(s.position)}</b><small>CHAMP POS</small></div><div class="fact"><b>${esc(s.points)}</b><small>POINTS</small></div><div class="fact"><b>${esc(s.wins)}</b><small>${YEAR} WINS</small></div><div class="fact"><b>${age(d.dateOfBirth)}</b><small>AGE</small></div><div class="fact"><b>${fmtDate(d.dateOfBirth+'T12:00:00Z',{day:'numeric',month:'short',year:'numeric'})}</b><small>BORN</small></div><div class="fact"><b>${esc(d.nationality)}</b><small>NATIONALITY</small></div></div></div></div><div class="spacer"></div>${titleBlock('HISTORY','Career')}<div id="driver-career"><div class="loader">Loading F1 career…</div></div><div class="spacer"></div><div class="actions"><a class="external-btn" href="${esc(d.url||'#')}" target="_blank" rel="noopener">PROFILE SOURCE ↗</a></div>`;loadDriverCareerInto(id); }
+function renderDriver(id){ const s=state.drivers.find(x=>x.Driver.driverId===id);if(!s)return setRoute('drivers');const d=s.Driver,team=s.Constructors?.at(-1)?.name||'',imgs=driverPhotoUrls(s),img=imgs[0];view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('drivers')">← DRIVERS</button></div><div class="spacer"></div><div class="card driver-profile-card" style="overflow:hidden"><div class="driver-profile-hero" style="border-left-color:${teamColour(team)}"><div class="driver-profile-copy"><div class="eyebrow">#${esc(d.permanentNumber||'—')} · ${esc(driverCode(d))}</div><h1>${esc(fullName(d))}</h1><div class="muted">${esc(d.nationality)} · ${esc(team)}</div></div><div class="profile-photo-holder">${img?`<img ${driverPhotoAttrs(imgs,driverCode(d))} onerror="driverPhotoError(this)" alt="${esc(fullName(d))}">`:`<div class="avatar profile-avatar">${esc(driverCode(d))}</div>`}</div></div><div class="driver-profile-stats"><div class="facts"><div class="fact"><b>${esc(s.position)}</b><small>CHAMP POS</small></div><div class="fact"><b>${esc(s.points)}</b><small>POINTS</small></div><div class="fact"><b>${esc(s.wins)}</b><small>${YEAR} WINS</small></div><div class="fact"><b>${age(d.dateOfBirth)}</b><small>AGE</small></div><div class="fact"><b>${fmtDate(d.dateOfBirth+'T12:00:00Z',{day:'numeric',month:'short',year:'numeric'})}</b><small>BORN</small></div><div class="fact"><b>${esc(d.nationality)}</b><small>NATIONALITY</small></div></div></div></div><div class="spacer"></div>${titleBlock('HISTORY','Career')}<div id="driver-career"><div class="loader">Loading F1 career…</div></div><div class="spacer"></div><div class="actions"><a class="external-btn" href="${esc(d.url||'#')}" target="_blank" rel="noopener">PROFILE SOURCE ↗</a></div>`;loadDriverCareerInto(id); }
 
 function renderTeams(){ view.innerHTML=titleBlock(`${YEAR} GRID`,'Teams')+`<div class="grid two">${state.constructors.map(c=>`<div class="card ${isFavouriteTeamName(c.Constructor.name)?'is-favourite':''}" style="border-left:5px solid ${teamColour(c.Constructor.name)}"><div class="eyebrow">P${esc(c.position)}</div><div class="card-title" style="font-size:20px;margin-top:5px">${esc(c.Constructor.name)}</div><div class="stat-big">${esc(c.points)} <span class="muted" style="font-size:11px">PTS</span></div><div class="muted">${esc(c.wins)} wins · ${esc(c.Constructor.nationality||'')}</div></div>`).join('')}</div>`; }
 function renderCircuits(){ view.innerHTML=titleBlock(`${YEAR} CALENDAR`,'Circuits')+`<div class="grid two">${state.schedule.map(r=>{const src=circuitSvg(r.Circuit.circuitId);return `<div class="card clickable" onclick="setRoute('circuit:${r.round}')">${src?`<div class="track-img-wrap"><img class="track-img" src="${src}" alt="${esc(r.Circuit.circuitName)} layout" loading="lazy"></div>`:''}<div class="eyebrow">${flag(r.Circuit.Location.country)} ${esc(r.Circuit.Location.country)}</div><div class="card-title" style="margin-top:5px">${esc(r.Circuit.circuitName)}</div><div class="muted" style="margin-top:3px">${esc(r.Circuit.Location.locality)}</div></div>`}).join('')}</div>`; }
@@ -1332,7 +1364,7 @@ function carSchematicSvg(team,updates){
       const idx=perZoneCount[z.id]||0;perZoneCount[z.id]=idx+1;
       const pt=schematicMarkerPoint(z.id,idx),tag=`${u.mapIndex}`;
       const target=`car-${carTeamSlug(team)}-${u.mapIndex}`;
-      return `<button class="schematic-marker schematic-pin-marker" style="left:${pt.x}%;top:${pt.y}%;--car-accent:${accent};--label-dx:${pt.labelDx}%;--label-dy:${pt.labelDy}%" onclick="focusCarUpdate('${target}')" aria-label="Update ${tag}: ${esc(z.label)} (${pt.view} view)" title="Update ${tag}: ${esc(z.label)} · ${pt.view} view"><i aria-hidden="true"></i><span>${tag}</span></button>`;
+      return `<button class="schematic-pin-marker" style="left:${pt.x}%;top:${pt.y}%;--car-accent:${accent};--label-dx:${pt.labelDx}%;--label-dy:${pt.labelDy}%" onclick="focusCarUpdate('${target}')" aria-label="Update ${tag}: ${esc(z.label)} (${pt.view} view)" title="Update ${tag}: ${esc(z.label)} · ${pt.view} view"><i aria-hidden="true"></i><span>${tag}</span></button>`;
     });
   }).join('');
   return `<div class="car-schematic official-schematic" role="img" aria-label="Official-style 2026 Formula 1 reference schematic showing mapped update locations for ${esc(team)}" style="--car-accent:${accent}">
@@ -1983,18 +2015,22 @@ async function renderTrends(){
     view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Trends')+evolutionChart(evo.series,labels,colours)+`<div class="spacer"></div>${titleBlock('CONSTRUCTORS','Driver Contribution')}<div class="grid two">${contributions.map(c=>`<div class="card contribution-card" style="border-top:4px solid ${teamColour(c.team)}"><div class="eyebrow">${esc(c.team)}</div><div class="stat-big">${c.total}<small> pts</small></div><div class="contribution-bar" style="color:${teamColour(c.team)}">${c.members.map((m,i)=>`<i style="width:${c.total?Math.max(2,m.pts/c.total*100):0}%;opacity:${i?0.55:1}"></i>`).join('')}</div>${c.members.map(m=>`<div class="history-leader"><b>${esc(m.code)}</b><span>${m.pts} pts · ${c.total?Math.round(m.pts/c.total*100):0}%</span></div>`).join('')}</div>`).join('')}</div><div class="source-note">Points evolution uses published race and sprint classifications. Constructor contribution compares the current points held by each team's listed drivers with the constructor total.</div>`;
   }catch{view.innerHTML=titleBlock(`${YEAR} CHAMPIONSHIP`,'Trends')+'<div class="error-box">Championship trends could not be calculated right now.</div>';}
 }
+function formatCompareValue(label,value){
+  const v=Number(value);if(!Number.isFinite(v))return '—';
+  return /^AVG\b/i.test(String(label||''))?v.toFixed(1):String(Number.isInteger(v)?v:Math.round(v*10)/10);
+}
 function compareMetricBar(label,a,b,options={}){
   const higher=options.higher!==false;
   const av=Number(a)||0,bv=Number(b)||0,max=Math.max(1,av,bv);
   const aw=max?av/max*100:0,bw=max?bv/max*100:0;
   const aWin=higher?av>bv:av<bv,bWin=higher?bv>av:bv<av,tie=av===bv;
-  return `<div class="compare-metric"><div class="compare-metric-top"><span>${esc(label)}</span><b>${tie?'EVEN':aWin?esc(options.aCode||'A'):bWin?esc(options.bCode||'B'):'—'}</b></div><div class="compare-metric-values"><strong class="${aWin&&!tie?'winner':''}">${Number.isFinite(av)?av:esc(a)}</strong><small>${options.aCode||'A'}</small><div class="compare-bar-track"><i class="a" style="width:${aw}%"></i><i class="b" style="width:${bw}%"></i></div><small>${options.bCode||'B'}</small><strong class="${bWin&&!tie?'winner':''}">${Number.isFinite(bv)?bv:esc(b)}</strong></div></div>`;
+  return `<div class="compare-metric"><div class="compare-metric-top"><span>${esc(label)}</span><b>${tie?'EVEN':aWin?esc(options.aCode||'A'):bWin?esc(options.bCode||'B'):'—'}</b></div><div class="compare-metric-values"><strong class="${aWin&&!tie?'winner':''}">${formatCompareValue(label,av)}</strong><small>${options.aCode||'A'}</small><div class="compare-bar-track"><i class="a" style="width:${aw}%"></i><i class="b" style="width:${bw}%"></i></div><small>${options.bCode||'B'}</small><strong class="${bWin&&!tie?'winner':''}">${formatCompareValue(label,bv)}</strong></div></div>`;
 }
 function compareDriverStatChip(label,value,sub=''){
   return `<div class="compare-driver-chip"><b>${esc(String(value))}</b><small>${esc(label)}</small>${sub?`<span>${esc(sub)}</span>`:''}</div>`;
 }
 function compareDriverHero(stat,standing,accent){
-  const imgs=driverPhotoUrls(standing),img=imgs[0],fb=imgs[1]||'';
+  const imgs=driverPhotoUrls(standing),img=imgs[0];
   return `<div class="card compare-driver-card" style="--team:${accent}"><div class="compare-driver-head"><div><div class="eyebrow">#${esc(standing.Driver.permanentNumber||'—')} · ${esc(stat.code)}</div><div class="compare-driver-name">${esc(stat.name)}</div><div class="compare-driver-meta">${esc(stat.nationality)} · ${esc(stat.team)}</div></div><div class="compare-champ-pill"><b>P${esc(stat.champPos||'—')}</b><small>CHAMP</small></div></div><div class="compare-driver-body"><div class="compare-driver-stats">${[
     compareDriverStatChip('POINTS',stat.points),
     compareDriverStatChip('WINS',stat.wins),
@@ -2002,7 +2038,7 @@ function compareDriverHero(stat,standing,accent){
     compareDriverStatChip('AVG FIN',stat.avgF),
     compareDriverStatChip('POLES',stat.poles),
     compareDriverStatChip('DNFS',stat.dnfs)
-  ].join('')}</div><div class="compare-driver-media">${img?`<img class="compare-driver-photo" src="${esc(img)}" data-fallback="${esc(fb)}" data-code="${esc(stat.code)}" onerror="driverPhotoError(this)" alt="${esc(stat.name)}" loading="lazy">`:`<div class="compare-driver-photo avatar">${esc(stat.code)}</div>`}</div></div></div>`;
+  ].join('')}</div><div class="compare-driver-media">${img?`<img class="compare-driver-photo" ${driverPhotoAttrs(imgs,stat.code)} onerror="driverPhotoError(this)" alt="${esc(stat.name)}" loading="lazy">`:`<div class="compare-driver-photo avatar">${esc(stat.code)}</div>`}</div></div></div>`;
 }
 function compareOverviewGraphic(a,b,colours){
   const rows=[
@@ -2039,28 +2075,38 @@ function compareSummaryCard(a,b,h){
 }
 function renderCompare(){
   const opts=state.drivers.map(s=>`<option value="${esc(s.Driver.driverId)}">${esc(fullName(s.Driver))}</option>`).join('');
-  view.innerHTML=`<div class="compare-page" data-no-swipe>${titleBlock(`${YEAR} SEASON`,'Driver Compare')}<div class="card compare-form-card"><div class="grid two"><label><div class="eyebrow">DRIVER A</div><select id="cmp-a">${opts}</select></label><label><div class="eyebrow">DRIVER B</div><select id="cmp-b">${opts}</select></label></div><div class="spacer"></div><button id="cmp-go" class="external-btn red">COMPARE</button></div><div id="cmp-out" class="spacer"></div></div>`;
-  const a=document.getElementById('cmp-a'),b=document.getElementById('cmp-b');b.selectedIndex=Math.min(1,b.options.length-1);
+  const defaultA=state.drivers[0]?.Driver?.driverId||'',defaultB=state.drivers[1]?.Driver?.driverId||defaultA;
+  if(!state.compareA)state.compareA=defaultA;
+  if(!state.compareB||state.compareB===state.compareA)state.compareB=defaultB;
+  view.innerHTML=`<div class="compare-page" data-no-swipe>${titleBlock(`${YEAR} SEASON`,'Driver Compare')}<div class="card compare-form-card"><div class="grid two"><label><div class="eyebrow">DRIVER A</div><select id="cmp-a">${opts}</select></label><label><div class="eyebrow">DRIVER B</div><select id="cmp-b">${opts}</select></label></div><div class="spacer"></div><button id="cmp-go" class="external-btn red">COMPARE</button></div><div id="cmp-out" class="spacer">${state.compareBusy?'<div class="loader">Comparing…</div>':state.compareResultHtml}</div></div>`;
+  const a=document.getElementById('cmp-a'),b=document.getElementById('cmp-b'),out=document.getElementById('cmp-out');
+  if(a&&[...a.options].some(o=>o.value===state.compareA))a.value=state.compareA;
+  if(b&&[...b.options].some(o=>o.value===state.compareB))b.value=state.compareB;
+  a?.addEventListener('change',()=>{state.compareA=a.value});
+  b?.addEventListener('change',()=>{state.compareB=b.value});
   document.getElementById('cmp-go').onclick=async()=>{
-    const out=document.getElementById('cmp-out');
-    if(a.value===b.value){out.innerHTML='<div class="error-box">Choose two different drivers.</div>';return;}
-    out.innerHTML='<div class="loader">Comparing…</div>';
+    state.compareA=a.value;state.compareB=b.value;
+    if(a.value===b.value){state.compareResultHtml='<div class="error-box">Choose two different drivers.</div>';out.innerHTML=state.compareResultHtml;return;}
+    state.compareBusy=true;out.innerHTML='<div class="loader">Comparing…</div>';
     out.scrollIntoView?.({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
     try{
       const [[races,quali],sprints]=await Promise.all([getSeasonData(),fetchSeasonSprints()]);
       const byId=Object.fromEntries(state.drivers.map(s=>[s.Driver.driverId,s]));
-      const sa=byId[a.value],sb=byId[b.value],aa=simpleDriverStats(a.value,races,quali,byId),bb=simpleDriverStats(b.value,races,quali,byId),h=pairHeadToHead(a.value,b.value,races,quali),evo=pointsEvolution([a.value,b.value],races,sprints),labels={[a.value]:aa.code,[b.value]:bb.code},colours={a:teamColour(sa?.Constructors?.at(-1)?.name||''),b:teamColour(sb?.Constructors?.at(-1)?.name||''),[a.value]:teamColour(sa?.Constructors?.at(-1)?.name||''),[b.value]:teamColour(sb?.Constructors?.at(-1)?.name||'')};
+      const sa=byId[a.value],sb=byId[b.value],aa=simpleDriverStats(a.value,races,quali,byId),bb=simpleDriverStats(b.value,races,quali,byId),h=pairHeadToHead(a.value,b.value,races,quali),evo=pointsEvolution([a.value,b.value],races,sprints),labels={[a.value]:aa.code,[b.value]:bb.code};
+      const teamA=teamColour(sa?.Constructors?.at(-1)?.name||''),teamBRaw=teamColour(sb?.Constructors?.at(-1)?.name||''),teamB=teamA.toLowerCase()===teamBRaw.toLowerCase()?'#f1f1f1':teamBRaw,colours={a:teamA,b:teamB,[a.value]:teamA,[b.value]:teamB};
       const metrics=[
-        compareMetricBar('POINTS',Number(aa.points||0),Number(bb.points||0),{aCode:aa.code,bCode:bb.code}),
-        compareMetricBar('WINS',Number(aa.wins||0),Number(bb.wins||0),{aCode:aa.code,bCode:bb.code}),
-        compareMetricBar('PODIUMS',Number(aa.pod||0),Number(bb.pod||0),{aCode:aa.code,bCode:bb.code}),
-        compareMetricBar('POLES',Number(aa.poles||0),Number(bb.poles||0),{aCode:aa.code,bCode:bb.code}),
-        compareMetricBar('DNFS',Number(aa.dnfs||0),Number(bb.dnfs||0),{aCode:aa.code,bCode:bb.code,higher:false}),
-        compareMetricBar('AVG FINISH',Number(aa.avgFNum||0),Number(bb.avgFNum||0),{aCode:aa.code,bCode:bb.code,higher:false}),
-        compareMetricBar('AVG QUALI',Number(aa.avgQNum||0),Number(bb.avgQNum||0),{aCode:aa.code,bCode:bb.code,higher:false})
+        compareMetricBar('POINTS',aa.points,bb.points,{aCode:aa.code,bCode:bb.code}),
+        compareMetricBar('WINS',aa.wins,bb.wins,{aCode:aa.code,bCode:bb.code}),
+        compareMetricBar('PODIUMS',aa.pod,bb.pod,{aCode:aa.code,bCode:bb.code}),
+        compareMetricBar('POLES',aa.poles,bb.poles,{aCode:aa.code,bCode:bb.code}),
+        compareMetricBar('DNFS',aa.dnfs,bb.dnfs,{aCode:aa.code,bCode:bb.code,higher:false}),
+        compareMetricBar('AVG FINISH',aa.avgFNum,bb.avgFNum,{aCode:aa.code,bCode:bb.code,higher:false}),
+        compareMetricBar('AVG QUALI',aa.avgQNum,bb.avgQNum,{aCode:aa.code,bCode:bb.code,higher:false})
       ].join('');
-      out.innerHTML=`${compareOverviewGraphic(aa,bb,colours)}<div class="spacer"></div>${compareSummaryCard(aa,bb,h)}<div class="spacer"></div><div class="grid desktop-two compare-deck"><div>${compareRadarSvg(aa,bb,colours)}</div><div class="card compare-metrics-card"><div class="eyebrow">METRICS</div>${metrics}</div></div><div class="spacer"></div><div class="grid two compare-hero-grid">${compareDriverHero(aa,sa,colours.a)}${compareDriverHero(bb,sb,colours.b)}</div><div class="spacer"></div>${evolutionChart(evo.series,labels,colours)}<div class="spacer"></div><div class="actions"><button class="external-btn" onclick="shareText('F1 Hub driver comparison','${aa.code} vs ${bb.code}: ${aa.points}-${bb.points} pts, qualifying H2H ${h.qA}-${h.qB}, race H2H ${h.raceA}-${h.raceB}.')">SHARE COMPARISON</button></div>`;
-    }catch{out.innerHTML='<div class="error-box">Could not load season history.</div>';}
+      state.compareResultHtml=`${compareOverviewGraphic(aa,bb,colours)}<div class="spacer"></div>${compareSummaryCard(aa,bb,h)}<div class="spacer"></div><div class="grid desktop-two compare-deck"><div>${compareRadarSvg(aa,bb,colours)}</div><div class="card compare-metrics-card"><div class="eyebrow">METRICS</div>${metrics}</div></div><div class="spacer"></div><div class="grid two compare-hero-grid">${compareDriverHero(aa,sa,colours.a)}${compareDriverHero(bb,sb,colours.b)}</div><div class="spacer"></div>${evolutionChart(evo.series,labels,colours)}<div class="spacer"></div><div class="actions"><button class="external-btn" onclick="shareText('F1 Hub driver comparison','${aa.code} vs ${bb.code}: ${aa.points}-${bb.points} pts, qualifying H2H ${h.qA}-${h.qB}, race H2H ${h.raceA}-${h.raceB}.')">SHARE COMPARISON</button></div>`;
+      out.innerHTML=state.compareResultHtml;
+    }catch{state.compareResultHtml='<div class="error-box">Could not load season history.</div>';out.innerHTML=state.compareResultHtml;}
+    finally{state.compareBusy=false;}
   };
 }
 function simpleDriverStats(id,races,quali,byId){

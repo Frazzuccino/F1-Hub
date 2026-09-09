@@ -415,3 +415,21 @@ body.compare-route .view{height:calc(100dvh - 66px);overflow:hidden;padding-bott
 /* More cards are swipe surfaces as well as tap targets. */
 .menu-card{touch-action:pan-y pinch-zoom}
 @media(max-width:620px){.schematic-pin-marker>span{width:18px;height:18px;left:9px;top:-18px;font-size:8px}.schematic-pin-marker:before{width:34px;height:34px;left:-17px;top:-17px}}
+
+
+/* v1.20.0 phone-QA fixes */
+/* Use only the new pin marker class. The legacy .schematic-marker class is deliberately not attached in v1.20. */
+.schematic-pin-marker{position:absolute!important;z-index:6!important;width:1px!important;height:1px!important;min-width:0!important;min-height:0!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;outline:0;transform:none!important;overflow:visible!important;appearance:none;-webkit-appearance:none;color:#fff}
+.schematic-pin-marker::before{content:"";position:absolute;width:28px;height:28px;left:-14px;top:-14px;border:0;background:transparent!important;border-radius:50%;box-shadow:none!important}
+.schematic-pin-marker>i{position:absolute;left:-2.5px;top:-2.5px;width:6px;height:6px;border-radius:50%;background:var(--car-accent);border:1.25px solid #fff;box-shadow:0 0 0 1.5px color-mix(in srgb,var(--car-accent) 24%,transparent),0 0 5px color-mix(in srgb,var(--car-accent) 55%,transparent)}
+.schematic-pin-marker::after{content:"";position:absolute;left:3px;top:-1px;width:9px;height:1px;background:color-mix(in srgb,var(--car-accent) 68%,#fff);transform:rotate(-35deg);transform-origin:left center;opacity:.82}
+.schematic-pin-marker>span{position:absolute;left:9px;top:-15px;width:15px;height:15px;border-radius:50%;display:grid;place-items:center;background:#111;border:1.25px solid color-mix(in srgb,var(--car-accent) 75%,#fff);box-shadow:0 2px 5px #000b;font-size:7px;line-height:1;font-weight:1000;color:#fff;transform:none}
+.schematic-pin-marker:hover>span,.schematic-pin-marker:focus-visible>span{transform:scale(1.08)}
+/* Driver Compare must never create horizontal overflow on a narrow phone. */
+body.compare-route,.compare-page,#cmp-out,.compare-deck,.compare-deck>*,.compare-radar-card,.compare-metrics-card{max-width:100%;min-width:0;overflow-x:hidden!important}
+.compare-radar-card{width:100%}.compare-radar{display:block;width:100%!important;max-width:100%!important;height:auto!important;aspect-ratio:1/1;overflow:hidden}
+.compare-radar-labels text{font-size:9px}.compare-metric-values strong{font-variant-numeric:tabular-nums;white-space:nowrap}
+/* Prefer crisp original driver assets and give the transparent portraits a little more room. */
+.driver-photo,.profile-photo-holder img,.compare-driver-photo{image-rendering:auto;transform:translateZ(0);backface-visibility:hidden}
+.driver-photo-holder,.driver-photo{height:132px}.profile-photo-holder,.profile-photo-holder img{height:265px}
+@media(max-width:620px){.schematic-pin-marker>span{width:15px;height:15px;left:9px;top:-15px;font-size:7px}.compare-radar{aspect-ratio:1/1}.driver-photo-holder,.driver-photo{height:128px}.profile-photo-holder,.profile-photo-holder img,.profile-avatar{height:225px}}

@@ -41,7 +41,7 @@
   function nearestIndexByTime(points,targetMs){let best=0,bd=Infinity;(points||[]).forEach((p,i)=>{const d=Math.abs(Number(p.t)-targetMs);if(d<bd){bd=d;best=i;}});return best;}
   function bounds(all,pad=.08){const xs=all.map(p=>p.x),ys=all.map(p=>p.y),xmin=Math.min(...xs),xmax=Math.max(...xs),ymin=Math.min(...ys),ymax=Math.max(...ys),w=Math.max(1,xmax-xmin),h=Math.max(1,ymax-ymin);return [xmin-w*pad,ymin-h*pad,w*(1+2*pad),h*(1+2*pad)];}
   function projector(all,rotation=0,W=1000,H=700,pad=55){
-    const rotated=rotatePoints(all,rotation),[xmin,ymin,w,h]=bounds(rotated,.02),scale=Math.min((W-pad*2)/w,(H-pad*2)/h),ox=(W-w*scale)/2-xmin*scale,oy=(H-h*scale)/2+ymin*scale;
+    const rotated=rotatePoints(all,rotation),[xmin,ymin,w,h]=bounds(rotated,.02),scale=Math.min((W-pad*2)/w,(H-pad*2)/h),ox=(W-w*scale)/2-xmin*scale,oy=(H-h*scale)/2-ymin*scale;
     return {W,H,point:p=>{const [q]=rotatePoints([p],rotation);return {...p,x:ox+q.x*scale,y:H-(oy+q.y*scale)};}};
   }
   function officialExperience(trackRows,cornerRows,rotation,lapLengthM,lap){
@@ -51,12 +51,12 @@
     const i1=lap?.duration_sector_1?nearestIndexByTime(track,s1Ms):-1,i2=lap?.duration_sector_2?nearestIndexByTime(track,s2Ms):-1;
     const sectorProgress=[i1>=0?cum[i1]/total:null,i2>=0?cum[i2]/total:null].filter(v=>v!==null);
     const length=Number(lapLengthM||0)||total;
-    const turns=pc.map((c,i)=>{const raw=cornerRows[i],progress=raw.distanceM!==null&&length>0?Math.max(0,Math.min(1,raw.distanceM/length)):null;const prog=progress??0;const sector=sectorProgress.length===2?(prog<sectorProgress[0]?1:prog<sectorProgress[1]?2:3):null;return {...c,turn:raw.number,label:`${raw.number}${raw.letter||''}`,letter:raw.letter,distanceM:raw.distanceM,progress:prog,sector};});
+    const turns=pc.map((c,i)=>{const raw=cornerRows[i],progress=raw.distanceM!==null&&length>0?Math.max(0,Math.min(1,raw.distanceM/length)):null;const prog=progress??0;const sector=sectorProgress.length===2?(prog<sectorProgress[0]?1:prog<sectorProgress[1]?2:3):null;return {...c,id:`${raw.number}${raw.letter||''}`,turn:raw.number,label:`${raw.number}${raw.letter||''}`,letter:raw.letter,distanceM:raw.distanceM,progress:prog,sector};});
     const sectors=[];if(i1>=0)sectors.push({...pt[i1],label:'S1',progress:sectorProgress[0]});if(i2>=0)sectors.push({...pt[i2],label:'S2',progress:sectorProgress[1]});
     return {track:pt,turns,sectors,start:pt[0],full:[0,0,pr.W,pr.H],trackLengthPx:total};
   }
   function cornerOnlyExperience(cornerRows,rotation,lapLengthM){
-    if(!cornerRows?.length)return null;const pr=projector(cornerRows,rotation),pc=cornerRows.map(pr.point),track=catmullClosed(pc,18),length=Number(lapLengthM||0)||Math.max(...cornerRows.map(c=>Number(c.distanceM||0)),1);const turns=pc.map((c,i)=>{const raw=cornerRows[i],progress=raw.distanceM!==null&&length>0?Math.max(0,Math.min(1,raw.distanceM/length)):i/pc.length;return {...c,turn:raw.number,label:`${raw.number}${raw.letter||''}`,letter:raw.letter,distanceM:raw.distanceM,progress,sector:null};});return {track,turns,sectors:[],start:track[0]||pc[0],full:[0,0,pr.W,pr.H],trackLengthPx:cumulative(track).at(-1)||1};
+    if(!cornerRows?.length)return null;const pr=projector(cornerRows,rotation),pc=cornerRows.map(pr.point),track=catmullClosed(pc,18),length=Number(lapLengthM||0)||Math.max(...cornerRows.map(c=>Number(c.distanceM||0)),1);const turns=pc.map((c,i)=>{const raw=cornerRows[i],progress=raw.distanceM!==null&&length>0?Math.max(0,Math.min(1,raw.distanceM/length)):i/pc.length;return {...c,id:`${raw.number}${raw.letter||''}`,turn:raw.number,label:`${raw.number}${raw.letter||''}`,letter:raw.letter,distanceM:raw.distanceM,progress,sector:null};});return {track,turns,sectors:[],start:track[0]||pc[0],full:[0,0,pr.W,pr.H],trackLengthPx:cumulative(track).at(-1)||1};
   }
   function longStraights(cornerRows,lapLengthM,count=4){
     const cs=(cornerRows||[]).filter(c=>c.distanceM!==null).slice().sort((a,b)=>a.distanceM-b.distanceM);if(cs.length<2||!lapLengthM)return[];const out=[];

@@ -22,14 +22,12 @@ const JINA = 'https://r.jina.ai/';
 const MOTORSPORT_STANDINGS = `https://www.motorsport.com/f1/standings/${YEAR}/`;
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const APP_VERSION = '1.23.0';
+const APP_VERSION = '1.24.0';
 const Q = globalThis.F1HubQuality;
 const CD = globalThis.F1HubCarDevelopment;
 const CAREER = globalThis.F1HubDriverCareer;
 const CIRX = globalThis.F1HubCircuitExperience;
-const STATIC_DRIVER_PHOTOS = {
-  lindblad: 'https://commons.wikimedia.org/wiki/Special:FilePath/Arvid_lindblad_Budapest_2026.jpg?width=700'
-};
+const CIRREG = globalThis.F1HubCircuitRegulations;
 
 const F1_RECORDS = {
   drivers:[
@@ -267,6 +265,7 @@ function circuitSvg(id){ const c=CIRCUITS[id]; if(!c)return null; if(c.f1db)retu
 function radarUrl(r){ const l=r.Circuit.Location; return `https://www.windy.com/-Weather-radar-radar?radar,${Number(l.lat).toFixed(4)},${Number(l.long).toFixed(4)},9`; }
 const CIRCUIT_GEOJSON='https://raw.githubusercontent.com/bacinger/f1-circuits/refs/heads/master/f1-circuits.geojson';
 const RAINVIEWER_API='https://api.rainviewer.com/public/weather-maps.json';
+const LIBREWXR_API='https://api.librewxr.net/public/weather-maps.json';
 function isStandalone(){ return window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches || window.navigator.standalone===true; }
 function wikiTitle(d){ return wikiPhotoCandidates(d)[0]||''; }
 function wikiPhotoCandidates(d){
@@ -318,8 +317,7 @@ function driverPhotoUrls(s){
   const of=state.photos[driverCode(d)]?.headshot_url;
   const ofHi=highResDriverPhoto(of),ofOriginal=originalDriverPhoto(of);
   const wiki=state.wikiPhotos[d?.driverId];
-  const special=/lindblad/i.test(`${d?.driverId||''} ${d?.givenName||''} ${d?.familyName||''}`)?STATIC_DRIVER_PHOTOS.lindblad:null;
-  return [...new Set([special,ofHi,ofOriginal,of,wiki].filter(Boolean))];
+  return [...new Set([ofHi,ofOriginal,of,wiki].filter(Boolean))];
 }
 function driverPhotoAttrs(imgs,code){
   const src=imgs?.[0]||'',fallbacks=(imgs||[]).slice(1);
@@ -991,9 +989,10 @@ function stopCircuitExperience(){
 function circuitTurnCards(turns){
   return turns.map(t=>`<button class="circuit-turn-card" data-turn="${esc(t.id)}" onclick="focusCircuitTurn('${esc(t.id)}')"><small>TURN</small><b>${esc(t.label)}</b><span>${t.sector?`SECTOR ${t.sector} · `:''}${t.distanceM!==null?`${(t.distanceM/1000).toFixed(2)} km`:'F1 TIMING'}</span></button>`).join('');
 }
-function circuitStraightCards(straights){
-  if(!straights?.length)return '';
-  return `<div class="circuit-straight-head"><span>LONG STRAIGHTS</span><small>BETWEEN OFFICIAL CORNERS</small></div><div class="circuit-straight-strip">${straights.map(x=>`<div class="circuit-straight-card"><small>STRAIGHT</small><b>T${esc(x.from)} → T${esc(x.to)}</b><span>≈ ${(x.distanceM/1000).toFixed(2)} km</span></div>`).join('')}</div>`;
+function circuitStraightCards(exp){
+  if(exp?.straightModeDisabled)return `<div class="circuit-straight-head"><span>2026 STRAIGHT MODE</span><small>OFFICIAL F1 ZONES</small></div><div class="circuit-official-unavailable">Straight Mode is disabled at this circuit; the cars remain in Corner Mode throughout the lap.</div>`;
+  const zones=exp?.straightMode||[];if(!zones.length)return `<div class="circuit-straight-head"><span>2026 STRAIGHT MODE</span><small>OFFICIAL F1 ZONES</small></div><div class="circuit-official-unavailable">Straight Mode zones have not yet been published for this 2026 event.</div>`;
+  return `<div class="circuit-straight-head"><span>2026 STRAIGHT MODE</span><small>${esc(exp.straightModeSource||'OFFICIAL F1 ZONES')}</small></div><div class="circuit-straight-strip">${zones.map(x=>`<div class="circuit-straight-card"><small>SM ${esc(x.id)}</small><b>${esc(x.name||`T${x.from} → T${x.to}`)}</b><span>${x.normalOffsetM?`Normal grip: ${x.normalOffsetM}m after T${esc(x.from)}`:`T${esc(x.from)} → T${esc(x.to)}`}${x.lowGripOffsetM?` · Low grip: ${x.lowGripOffsetM}m`:''}</span></div>`).join('')}</div>`;
 }
 function setCircuitViewBox(target,duration=480){
   const st=circuitExperienceState;if(!st?.svg)return;const svg=st.svg,from=String(svg.getAttribute('viewBox')||st.full.join(' ')).split(/[ ,]+/).map(Number),to=target.map(Number),start=performance.now();if(st.raf)cancelAnimationFrame(st.raf);
@@ -1011,6 +1010,8 @@ function resetCircuitCamera(){const st=circuitExperienceState;if(!st)return;st.p
 async function playCircuitLap(){const st=circuitExperienceState;if(!st?.turns?.length)return;const token=++st.playToken;for(const t of st.turns){if(!circuitExperienceState||token!==st.playToken)return;focusCircuitTurn(t.id,true);await sleep(matchMedia('(prefers-reduced-motion: reduce)').matches?230:650);}if(circuitExperienceState&&token===st.playToken){await sleep(300);resetCircuitCamera();}}
 window.focusCircuitTurn=focusCircuitTurn;window.resetCircuitCamera=resetCircuitCamera;window.playCircuitLap=playCircuitLap;
 const TRACING_CIRCUIT_BASE='https://raw.githubusercontent.com/TracingInsights';
+function findFiaCircuitMapLink(raw){for(const line of String(raw||'').split('\n')){if(!/Competition Notes[^\n]*Circuit Map|Circuit Map[^\n]*Pit Lane/i.test(line))continue;const m=line.match(/\[([^\]]*(?:Competition Notes[^\]]*Circuit Map|Circuit Map[^\]]*Pit Lane)[^\]]*)\]\(([^)]+)\)/i);if(m)return {title:m[1],url:absoluteFiaUrl(m[2])};}return null;}
+async function fiaCircuitMapData(r){for(const eventName of fiaCarPresentationEventNames(r)){try{const eventUrl=`https://www.fia.com/documents/championship/event/${encodeURIComponent(eventName)}`,page=await fetchText(JINA+eventUrl,`fia-circuit-event-${YEAR}-${r.round}-${eventName}`,7*24*3600e3),doc=findFiaCircuitMapLink(page);if(!doc)continue;const raw=await fetchText(JINA+doc.url,`fia-circuit-map-${YEAR}-${r.round}`,30*24*3600e3),parsed=CIRREG.parseFiaCircuitMap(raw);return {...parsed,url:doc.url,title:doc.title,source:'FIA Competition Notes circuit map'};}catch{}}return null;}
 function tracingCircuitEventNames(r){
   const id=r?.Circuit?.circuitId||'';
   const special={
@@ -1047,7 +1048,7 @@ async function circuitTimingSource(r){
   throw new Error('no-timing-session');
 }
 async function loadOfficialCircuitTiming(r,c){
-  const sourcePromise=circuitTimingSource(r).catch(()=>null),tracePromise=tracingCircuitCorners(r,[YEAR]);
+  const sourcePromise=circuitTimingSource(r).catch(()=>null),tracePromise=tracingCircuitCorners(r,[YEAR]),fiaPromise=fiaCircuitMapData(r).catch(()=>null);
   const trace=await tracePromise;let source=trace?await Promise.race([sourcePromise,timeoutValue(2500,null)]):await sourcePromise;
   const meeting=source?.meeting||null,session=source?.session||null,sourceYear=source?.year||trace?.year||YEAR;
   let corners=[],rotation=0,cornerSource='',cornerYear=sourceYear;
@@ -1065,17 +1066,24 @@ async function loadOfficialCircuitTiming(r,c){
   }
   if(!experience)experience=CIRX.cornerOnlyExperience(corners,rotation,Number(c.length||0)*1000);
   if(!experience)throw new Error('no-track');
-  return {...experience,referenceYear:cornerYear,meeting,session,lap,cornerSource,geometryMode:lap&&experience.sectors?.length?'lap-trace':'corner-reference',straights:CIRX.longStraights(corners,Number(c.length||0)*1000,4)};
+  experience.lapLengthM=Number(c.length||0)*1000;
+  const regs=await Promise.race([fiaPromise,timeoutValue(6500,null)]),fallback=CIRREG.straightModeFallback(r.Circuit.circuitId);
+  experience=CIRREG.applyCircuitRegulationData(experience,regs,fallback);
+  return {...experience,referenceYear:cornerYear,meeting,session,lap,cornerSource,fiaCircuitMap:regs,geometryMode:lap&&experience.sectors?.length?'lap-trace':'corner-reference'};
 }
 function officialCircuitSvg(exp){
-  const d=exp.track.map((p,i)=>`${i?'L':'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' '),turns=exp.turns.map(t=>`<g class="circuit-turn-marker" data-turn="${esc(t.id)}" transform="translate(${t.x.toFixed(1)} ${t.y.toFixed(1)})" onclick="focusCircuitTurn('${esc(t.id)}')"><circle r="12"></circle><text dy=".34em">${esc(t.label)}</text></g>`).join(''),sectors=exp.sectors.map(s=>`<g class="circuit-sector-marker" transform="translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})"><circle r="8"></circle><text x="12" dy=".34em">${esc(s.label)}</text></g>`).join(''),sf=exp.start?`<g class="circuit-sf-marker" transform="translate(${exp.start.x.toFixed(1)} ${exp.start.y.toFixed(1)})"><line x1="-8" y1="-12" x2="-8" y2="12"></line><line x1="-3" y1="-12" x2="-3" y2="12"></line><text x="7" dy=".34em">S/F</text></g>`:'';
-  return `<svg class="circuit-immersive-svg circuit-official-svg" viewBox="${exp.full.join(' ')}" role="img" aria-label="F1 timing-derived circuit map with numbered corners and sector boundaries"><path class="circuit-track-shadow" d="${d}"></path><path class="circuit-track-line" d="${d}"></path><g class="circuit-sector-markers">${sectors}${sf}</g><g class="circuit-turn-markers">${turns}</g></svg>`;
+  const d=exp.track.map((p,i)=>`${i?'L':'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+  const turns=exp.turns.map(t=>`<g class="circuit-turn-marker" data-turn="${esc(t.id)}" transform="translate(${t.x.toFixed(1)} ${t.y.toFixed(1)})" onclick="focusCircuitTurn('${esc(t.id)}')"><circle r="12"></circle><text dy=".34em">${esc(t.label)}</text></g>`).join('');
+  const sectors=(exp.sectors||[]).map(s=>`<g class="circuit-sector-marker" transform="translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})"><circle r="9"></circle><text x="13" dy=".34em">${esc(s.label)}</text></g>`).join('');
+  const sf=exp.start?`<g class="circuit-sf-marker" transform="translate(${exp.start.x.toFixed(1)} ${exp.start.y.toFixed(1)})"><line x1="-8" y1="-12" x2="-8" y2="12"></line><line x1="-3" y1="-12" x2="-3" y2="12"></line><text x="7" dy=".34em">S/F</text></g>`:'';
+  const sm=(exp.straightMode||[]).map(z=>{if(!z.path?.length)return '';const zd=z.path.map((p,i)=>`${i?'L':'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' '),mid=z.path[Math.floor(z.path.length/2)];return `<g class="circuit-sm-zone"><path d="${zd}"></path>${mid?`<g transform="translate(${mid.x.toFixed(1)} ${mid.y.toFixed(1)})"><circle r="10"></circle><text dy=".34em">SM</text></g>`:''}</g>`;}).join('');
+  return `<svg class="circuit-immersive-svg circuit-official-svg" viewBox="${exp.full.join(' ')}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="F1 circuit map with numbered corners, sector boundaries and 2026 Straight Mode zones"><path class="circuit-track-shadow" d="${d}"></path><path class="circuit-track-line" d="${d}"></path><g class="circuit-sm-zones">${sm}</g><g class="circuit-sector-markers">${sectors}${sf}</g><g class="circuit-turn-markers">${turns}</g></svg>`;
 }
 async function loadCircuitExperienceInto(r,c,src){
   const root=document.getElementById('circuit-experience');if(!root)return;stopCircuitExperience();
   try{
     const exp=await loadOfficialCircuitTiming(r,c);root.innerHTML=officialCircuitSvg(exp);const svg=root.querySelector('svg');circuitExperienceState={root,svg,turns:exp.turns,full:[...exp.full],active:'',playToken:0,raf:0,lengthKm:c.length||0,referenceYear:exp.referenceYear};
-    const strip=document.getElementById('circuit-turn-strip');if(strip)strip.innerHTML=circuitTurnCards(exp.turns);const straight=document.getElementById('circuit-straight-zone');if(straight)straight.innerHTML=circuitStraightCards(exp.straights);const hud=document.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML=`<b>FULL LAP</b><span>${exp.referenceYear===YEAR?'CURRENT F1 CORNER REFERENCE':`${exp.referenceYear} F1 CORNER REFERENCE`}</span>`;const note=document.getElementById('circuit-guide-note');if(note)note.innerHTML=`Turn numbers/positions come from ${esc(exp.cornerSource||'FastF1/MultiViewer circuit metadata')}. ${exp.geometryMode==='lap-trace'?'The track line and S1/S2 markers use a real historical OpenF1 lap trace and sector timestamps.':'The turn guide uses archived FastF1/MultiViewer corner coordinates; sector markers are hidden because a validated lap trace was not available.'} ${exp.referenceYear!==YEAR?`This layout uses the latest available ${exp.referenceYear} reference.`:''}`;
+    const strip=document.getElementById('circuit-turn-strip');if(strip)strip.innerHTML=circuitTurnCards(exp.turns);const straight=document.getElementById('circuit-straight-zone');if(straight)straight.innerHTML=circuitStraightCards(exp);const hud=document.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML=`<b>FULL LAP</b><span>${exp.referenceYear===YEAR?'CURRENT F1 CORNER REFERENCE':`${exp.referenceYear} F1 CORNER REFERENCE`}</span>`;const note=document.getElementById('circuit-guide-note');if(note)note.innerHTML=`Turn numbers/positions come from ${esc(exp.cornerSource||'FastF1/MultiViewer circuit metadata')}. ${exp.sectors?.length?`S1/S2 boundaries are shown from ${esc(exp.sectorSource||'F1 timing sector data')}.`:'Sector boundaries are not yet available for this event.'} ${exp.straightModeDisabled?'Straight Mode is disabled at this circuit.':exp.straightMode?.length?`Straight Mode zones are shown from ${esc(exp.straightModeSource||'official 2026 circuit guidance')}.`:'Straight Mode zones have not yet been published for this event.'} ${exp.referenceYear!==YEAR?`This layout uses the latest available ${exp.referenceYear} reference.`:''}`;
   }catch{
     root.innerHTML=src?`<img class="circuit-fallback-img" src="${esc(src)}" alt="${esc(r.Circuit.circuitName)} layout">`:'<div class="circuit-stage-fallback">Circuit layout unavailable.</div>';const strip=document.getElementById('circuit-turn-strip');if(strip)strip.innerHTML='<div class="circuit-official-unavailable">F1 timing corner metadata is unavailable for this circuit right now. F1 Hub will not invent turn positions.</div>';const straight=document.getElementById('circuit-straight-zone');if(straight)straight.innerHTML='';const hud=document.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML='<b>TRACK VIEW</b><span>Turn guide unavailable</span>';const note=document.getElementById('circuit-guide-note');if(note)note.textContent='Fallback layout only. Turn numbers and sector markers are intentionally hidden rather than estimated.';
   }
@@ -1084,7 +1092,7 @@ function renderCircuit(round){
   const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('circuits');const c=CIRCUITS[r.Circuit.circuitId]||{},src=circuitSvg(r.Circuit.circuitId);stopCircuitExperience();
   view.innerHTML=`<div class="actions"><button class="external-btn" onclick="setRoute('circuits')">← CIRCUITS</button></div><div class="spacer"></div>${titleBlock(flag(r.Circuit.Location.country)+' '+r.Circuit.Location.country,r.Circuit.circuitName)}
   <div class="card circuit-experience-card"><div class="circuit-experience-head"><div><div class="eyebrow">F1 TIMING CIRCUIT VIEW</div><div class="card-title">Explore an F1 timing lap reference</div></div><div class="actions"><button class="mini-btn wide" onclick="playCircuitLap()">▶ PLAY LAP</button><button class="mini-btn" onclick="resetCircuitCamera()" aria-label="Reset circuit view">↺</button></div></div><div class="circuit-stage"><div id="circuit-experience" class="circuit-viewport"><div class="loader">Loading F1 timing geometry…</div></div><div class="circuit-lap-hud" data-circuit-hud><b>FULL LAP</b><span>Loading official corner metadata…</span></div></div><div id="circuit-turn-strip" class="circuit-turn-strip"><div class="loader">Loading corners…</div></div><div id="circuit-straight-zone"></div><div id="circuit-guide-note" class="circuit-guide-note">Loading F1 timing-derived corner and sector data…</div></div>
-  <div class="spacer"></div><div class="card"><div class="facts"><div class="fact"><b>${c.length?c.length.toFixed(3)+' km':'—'}</b><small>LENGTH</small></div><div class="fact"><b>${c.laps??'—'}</b><small>LAPS</small></div><div class="fact"><b>${c.turns??'—'}</b><small>TURNS</small></div><div class="fact"><b>${c.first??'—'}</b><small>FIRST GP</small></div><div class="fact"><b>${c.length&&c.laps?(c.length*c.laps).toFixed(1)+' km':'—'}</b><small>RACE DIST.</small></div><div class="fact"><b>${fmtDate(raceIso(r),{day:'numeric',month:'short'})}</b><small>${YEAR} RACE</small></div></div><div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button><button class="external-btn" onclick="setRoute('race:${r.round}')">RACE HUB</button></div></div><div class="spacer"></div>${titleBlock('HISTORY','Previous Winners')}<div id="circuit-history"><div class="loader">Loading circuit history…</div></div><div class="source-note">Corner numbering and timing geometry are loaded from the circuit metadata URL exposed with OpenF1 meetings and the same MultiViewer circuit dataset used by FastF1. Track position comes from historical OpenF1 location telemetry; S1/S2 use lap-sector timestamps. Historical winners come from Jolpica/Ergast.</div>`;
+  <div class="spacer"></div><div class="card"><div class="facts"><div class="fact"><b>${c.length?c.length.toFixed(3)+' km':'—'}</b><small>LENGTH</small></div><div class="fact"><b>${c.laps??'—'}</b><small>LAPS</small></div><div class="fact"><b>${c.turns??'—'}</b><small>TURNS</small></div><div class="fact"><b>${c.first??'—'}</b><small>FIRST GP</small></div><div class="fact"><b>${c.length&&c.laps?(c.length*c.laps).toFixed(1)+' km':'—'}</b><small>RACE DIST.</small></div><div class="fact"><b>${fmtDate(raceIso(r),{day:'numeric',month:'short'})}</b><small>${YEAR} RACE</small></div></div><div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button><button class="external-btn" onclick="setRoute('race:${r.round}')">RACE HUB</button></div></div><div class="spacer"></div>${titleBlock('HISTORY','Previous Winners')}<div id="circuit-history"><div class="loader">Loading circuit history…</div></div><div class="source-note">Corner numbering comes from FastF1/MultiViewer timing metadata. S1/S2 boundaries are enriched from official FIA Competition Notes circuit maps when available, and 2026 Straight Mode overlays use published Formula 1 zone definitions with FIA activation markers. Historical winners come from Jolpica/Ergast.</div>`;
   loadCircuitExperienceInto(r,c,src);loadCircuitHistoryInto(r);
 }
 async function loadCircuitHistoryInto(r){
@@ -1124,9 +1132,21 @@ function nearestCircuitFeature(geo,r){
   }
   return bestD<80?best:null;
 }
-function radarFrameLabel(frame,i,total){
-  const iso=new Date(Number(frame.time)*1000).toISOString(),latest=i===total-1?' · LATEST':'';
-  return `${fmtDateTime(iso)}${latest}`;
+function radarFrameLabel(frame,i,nowIndex){
+  const iso=new Date(Number(frame.time)*1000).toISOString(),delta=Math.round((Number(frame.time)-Number(frame._nowTime||frame.time))/60);
+  if(frame.kind==='forecast')return `FORECAST ${delta>0?`+${delta} MIN`:''} · ${fmtTime(iso)}`;
+  if(i===nowIndex)return `NOW · ${fmtTime(iso)}`;
+  return `${Math.abs(delta)} MIN AGO · ${fmtTime(iso)}`;
+}
+async function loadRadarCatalog(){
+  try{
+    const j=await fetchJSON(LIBREWXR_API,'librewxr-radar-frames',75e3,16000),past=j?.radar?.past||[],future=j?.radar?.nowcast||[];
+    if(past.length){const nowTime=Number(past.at(-1)?.time||Date.now()/1000),frames=[...past.map(x=>({...x,kind:'past',_nowTime:nowTime})),...future.map(x=>({...x,kind:'forecast',_nowTime:nowTime}))];return {host:j.host||'https://api.librewxr.net',frames,nowIndex:past.length-1,source:'LibreWXR',forecast:future.length>0,palette:10,query:'?arrows=light'};}
+  }catch{}
+  const j=await fetchJSON(RAINVIEWER_API,'rainviewer-frames',90e3,18000),past=j?.radar?.past||[],future=j?.radar?.nowcast||[];if(!past.length)throw new Error('No radar frames');const nowTime=Number(past.at(-1)?.time||Date.now()/1000),frames=[...past.map(x=>({...x,kind:'past',_nowTime:nowTime})),...future.map(x=>({...x,kind:'forecast',_nowTime:nowTime}))];return {host:j.host,frames,nowIndex:past.length-1,source:'RainViewer',forecast:future.length>0,palette:2,query:''};
+}
+function radarTimelineHtml(frames,nowIndex){
+  return `<div class="radar-timeline-labels"><span>PAST</span><b>NOW</b><span>FORECAST</span></div><div class="radar-timeline-strip">${frames.map((f,i)=>{const delta=Math.round((Number(f.time)-Number(f._nowTime))/60),label=i===nowIndex?'NOW':delta>0?`+${delta}`:`${delta}`;return `<button class="radar-time-chip ${f.kind==='forecast'?'forecast':''} ${i===nowIndex?'now':''}" data-radar-index="${i}" aria-label="Radar ${f.kind} ${label} minutes">${label}</button>`;}).join('')}</div>`;
 }
 let leafletPromise=null;
 function ensureLeaflet(){
@@ -1147,38 +1167,33 @@ async function initRainRadar(r){
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
     L.circleMarker([lat,lon],{radius:4,color:'#fff',weight:2,fillColor:'#ff1e1e',fillOpacity:1}).addTo(map);
     setTimeout(()=>map.invalidateSize(),80);
-
     try{
       const geo=await fetchJSON(CIRCUIT_GEOJSON,'circuit-geojson',30*864e5,22000),feature=nearestCircuitFeature(geo,r);
-      if(feature){
-        const halo=L.geoJSON(feature,{style:{color:'#050505',weight:9,opacity:.9,lineCap:'round',lineJoin:'round'}}).addTo(map);
-        L.geoJSON(feature,{style:{color:'#ff3434',weight:4,opacity:1,lineCap:'round',lineJoin:'round'}}).addTo(map);
-        const bounds=halo.getBounds();if(bounds.isValid())map.fitBounds(bounds.pad(1.4),{maxZoom:11});
-        document.getElementById('radar-track-status').textContent='Circuit outline locked to real map coordinates';
-      }else document.getElementById('radar-track-status').textContent='Circuit outline unavailable for this venue';
+      if(feature){const halo=L.geoJSON(feature,{style:{color:'#050505',weight:9,opacity:.9,lineCap:'round',lineJoin:'round'}}).addTo(map);L.geoJSON(feature,{style:{color:'#ff3434',weight:4,opacity:1,lineCap:'round',lineJoin:'round'}}).addTo(map);const bounds=halo.getBounds();if(bounds.isValid())map.fitBounds(bounds.pad(.85),{maxZoom:12});document.getElementById('radar-track-status').textContent='Circuit outline locked to real map coordinates';}
+      else document.getElementById('radar-track-status').textContent='Circuit outline unavailable for this venue';
     }catch{document.getElementById('radar-track-status').textContent='Circuit outline could not be loaded';}
-
-    const rv=await fetchJSON(RAINVIEWER_API,'rainviewer-frames',90e3,18000),frames=rv?.radar?.past||[];
-    if(!frames.length)throw new Error('No radar frames');
-    let idx=frames.length-1,radarLayer=null,playing=false;
-    const prev=document.getElementById('radar-prev'),play=document.getElementById('radar-play'),next=document.getElementById('radar-next');
+    const cat=await loadRadarCatalog(),frames=cat.frames;let idx=cat.nowIndex,radarLayer=null,playing=false;
+    const prev=document.getElementById('radar-prev'),play=document.getElementById('radar-play'),next=document.getElementById('radar-next'),timeline=document.getElementById('radar-timeline'),source=document.getElementById('radar-source');
+    if(timeline)timeline.innerHTML=radarTimelineHtml(frames,cat.nowIndex);if(source)source.textContent=cat.forecast?`${cat.source} · observed + short-term nowcast`:`${cat.source} · observed radar only`;
     const setFrame=(n)=>{
-      idx=(n+frames.length)%frames.length;const frame=frames[idx];if(radarLayer)map.removeLayer(radarLayer);
-      radarLayer=L.tileLayer(`${rv.host}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`,{opacity:.68,maxNativeZoom:7,maxZoom:16,zIndex:220,attribution:'Radar © RainViewer'}).addTo(map);
-      status.textContent=radarFrameLabel(frame,idx,frames.length);prev.disabled=idx===0;next.disabled=idx===frames.length-1;
+      idx=Math.max(0,Math.min(frames.length-1,n));const frame=frames[idx];if(radarLayer)map.removeLayer(radarLayer);
+      const tileUrl=`${cat.host}${frame.path}/256/{z}/{x}/{y}/${cat.palette}/1_1.png${cat.query||''}`;
+      radarLayer=L.tileLayer(tileUrl,{opacity:.72,maxNativeZoom:7,maxZoom:16,zIndex:220,attribution:`Radar © ${cat.source}`}).addTo(map);
+      status.textContent=radarFrameLabel(frame,idx,cat.nowIndex);status.classList.toggle('forecast',frame.kind==='forecast');prev.disabled=idx===0;next.disabled=idx===frames.length-1;
+      timeline?.querySelectorAll('[data-radar-index]').forEach(x=>x.classList.toggle('active',Number(x.dataset.radarIndex)===idx));const chip=timeline?.querySelector(`[data-radar-index="${idx}"]`);chip?.scrollIntoView?.({behavior:'smooth',block:'nearest',inline:'center'});
     };
     const stop=()=>{playing=false;clearInterval(state.radarTimer);state.radarTimer=null;play.textContent='▶ PLAY';};
-    prev.onclick=()=>{stop();setFrame(Math.max(0,idx-1));};next.onclick=()=>{stop();setFrame(Math.min(frames.length-1,idx+1));};
-    play.onclick=()=>{if(playing){stop();return;}playing=true;play.textContent='Ⅱ PAUSE';state.radarTimer=setInterval(()=>{if(idx>=frames.length-1){idx=0;}else idx++;setFrame(idx);},700);};
+    prev.onclick=()=>{stop();setFrame(idx-1);};next.onclick=()=>{stop();setFrame(idx+1);};
+    timeline?.querySelectorAll('[data-radar-index]').forEach(btn=>btn.onclick=()=>{stop();setFrame(Number(btn.dataset.radarIndex));});
+    play.onclick=()=>{if(playing){stop();return;}playing=true;play.textContent='Ⅱ PAUSE';state.radarTimer=setInterval(()=>{if(idx>=frames.length-1)setFrame(0);else setFrame(idx+1);},650);};
     setFrame(idx);
   }catch(e){status.textContent='Rain radar could not be loaded. Use Open Windy below.';mapEl.innerHTML='<div class="radar-fallback">Radar temporarily unavailable</div>';}
 }
 async function renderRadar(round){
-  const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('races');const l=r.Circuit.Location;
-  view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('race:${r.round}')">← BACK</button></div><div class="spacer"></div>${titleBlock('WEATHER RADAR',r.Circuit.circuitName)}<div class="card radar-info"><div><div class="eyebrow">RADAR FRAME</div><div id="radar-status" class="card-title">Loading latest radar…</div><div id="radar-track-status" class="muted">Loading circuit outline…</div></div><div class="radar-controls"><button id="radar-prev" class="mini-btn" aria-label="Previous radar frame">‹</button><button id="radar-play" class="mini-btn wide">▶ PLAY</button><button id="radar-next" class="mini-btn" aria-label="Next radar frame">›</button></div></div><div class="radar-card"><div id="radar-map" class="radar-map" aria-label="Weather radar with ${esc(r.Circuit.circuitName)} circuit outline"></div></div><div class="spacer"></div><div class="actions"><a class="external-btn red" href="${esc(radarUrl(r))}" target="_blank" rel="noopener">OPEN WINDY ↗</a><button class="external-btn" onclick="setRoute('race:${r.round}')">RACE HUB</button></div><div class="source-note">RainViewer radar is shown over OpenStreetMap. The red circuit line uses georeferenced track coordinates, so its position and orientation stay aligned with the real circuit as you pan or zoom.</div>`;
+  const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('races');
+  view.innerHTML=`<div class="actions"><button class="external-btn" onclick="history.length>1?history.back():setRoute('race:${r.round}')">← BACK</button></div><div class="spacer"></div>${titleBlock('WEATHER RADAR',r.Circuit.circuitName)}<div class="card radar-info"><div><div class="eyebrow">RADAR / NOWCAST</div><div id="radar-status" class="card-title">Loading latest radar…</div><div id="radar-track-status" class="muted">Loading circuit outline…</div><div id="radar-source" class="muted">Loading radar source…</div></div><div class="radar-controls"><button id="radar-prev" class="mini-btn" aria-label="Previous radar frame">‹</button><button id="radar-play" class="mini-btn wide">▶ PLAY</button><button id="radar-next" class="mini-btn" aria-label="Next radar frame">›</button></div></div><div id="radar-timeline" class="radar-timeline"></div><div class="radar-card"><div id="radar-map" class="radar-map" aria-label="Weather radar and short-term rain nowcast with ${esc(r.Circuit.circuitName)} circuit outline"></div></div><div class="spacer"></div><div class="actions"><a class="external-btn red" href="${esc(radarUrl(r))}" target="_blank" rel="noopener">OPEN WINDY ↗</a><button class="external-btn" onclick="setRoute('race:${r.round}')">RACE HUB</button></div><div class="source-note">F1 Hub uses LibreWXR first for observed radar plus its short-term precipitation nowcast, with RainViewer as a fallback. Future frames are labelled FORECAST so they cannot be mistaken for observations. The circuit outline is georeferenced over OpenStreetMap.</div>`;
   await initRainRadar(r);
 }
-
 function renderRaceDetail(round){ const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('races');const c=CIRCUITS[r.Circuit.circuitId]||{},src=circuitSvg(r.Circuit.circuitId);view.innerHTML=`<div class="actions"><button class="external-btn" onclick="setRoute('races')">← CALENDAR</button><button class="external-btn" onclick="addRaceWeekendCalendar('${r.round}')">＋ CALENDAR</button></div><div class="spacer"></div><section class="hero" style="min-height:190px"><div class="hero-top"><span class="pill ${raceStatus(r)==='NEXT'?'live':'subtle'}">ROUND ${esc(r.round)}</span><span>${flag(r.Circuit.Location.country)}</span></div><h1>${esc(r.raceName.toUpperCase())}</h1><div class="circuit">${esc(r.Circuit.circuitName)}</div></section><div class="tabs"><button class="tab active" data-racetab="weekend">WEEKEND</button><button class="tab" data-racetab="results">RESULTS</button><button class="tab" data-racetab="control">RACE CONTROL</button><button class="tab" data-racetab="radio">RADIO</button></div><div id="race-tab-content"></div>`;
   const root=document.getElementById('race-tab-content'); const drawWeekend=()=>{root.innerHTML=`<div class="grid desktop-two"><div><div class="schedule-list">${sessionRows(r)}</div><div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button><button class="external-btn" onclick="setRoute('circuit:${r.round}')">TRACK INFO</button></div></div><div>${weatherCard(r)}${src?`<div class="spacer"></div><div class="card"><div class="track-img-wrap"><img class="track-img" src="${src}" alt="track layout"></div><div class="facts"><div class="fact"><b>${c.length||'—'} km</b><small>LENGTH</small></div><div class="fact"><b>${c.laps||'—'}</b><small>LAPS</small></div><div class="fact"><b>${c.turns||'—'}</b><small>TURNS</small></div></div></div>`:''}</div></div>`;loadWeatherIntoCard(r);}; drawWeekend();
   document.querySelectorAll('[data-racetab]').forEach(b=>b.onclick=async()=>{document.querySelectorAll('[data-racetab]').forEach(x=>x.classList.remove('active'));b.classList.add('active');const t=b.dataset.racetab;if(t==='weekend')drawWeekend();else if(t==='results')await drawResults(root,r);else if(t==='control')await drawRaceControl(root,r);else await drawRadio(root,r);});

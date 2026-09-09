@@ -1,5 +1,5 @@
-const CACHE_NAME='f1-hub-v1.21.0';
-const ASSETS=['./','./index.html','./manifest.json','./version.json','./icon.svg','./icon-192.png','./icon-512.png','./screenshot-standings.png','./screenshot-drivers.png','./styles.css?v=1.21.0','./quality-core.js?v=1.21.0','./car-development-core.js?v=1.21.0','./driver-career-core.js?v=1.21.0','./circuit-experience-core.js?v=1.21.0','./app.js?v=1.21.0','./tech-car-reference-clean2.png'];
+const CACHE_NAME='f1-hub-v1.22.0';
+const ASSETS=['./','./index.html','./manifest.json','./version.json','./icon.svg','./icon-192.png','./icon-512.png','./screenshot-standings.png','./screenshot-drivers.png','./styles.css?v=1.22.0','./quality-core.js?v=1.22.0','./car-development-core.js?v=1.22.0','./driver-career-core.js?v=1.22.0','./circuit-experience-core.js?v=1.22.0','./app.js?v=1.22.0','./tech-car-reference-clean2.png'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(ASSETS)));self.skipWaiting();});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k)))));self.clients.claim();});
 self.addEventListener('fetch',e=>{

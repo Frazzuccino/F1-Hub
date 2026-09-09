@@ -22,7 +22,7 @@ const JINA = 'https://r.jina.ai/';
 const MOTORSPORT_STANDINGS = `https://www.motorsport.com/f1/standings/${YEAR}/`;
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const APP_VERSION = '1.21.0';
+const APP_VERSION = '1.22.0';
 const Q = globalThis.F1HubQuality;
 const CD = globalThis.F1HubCarDevelopment;
 const CAREER = globalThis.F1HubDriverCareer;
@@ -713,7 +713,7 @@ function setRoute(route,push=true,motion=''){ if(!route)return; const changed=ro
 
 function render(){
   clearInterval(state.countdownTimer);clearInterval(state.radarTimer);state.radarTimer=null;
-  document.body.classList.toggle('compare-route',state.route==='compare');
+  document.body.classList.remove('compare-route');
   if(!String(state.route||'').startsWith('circuit:'))stopCircuitExperience();
   if(!state.loaded){view.innerHTML='<div class="loader">Loading F1 Hub…</div>';return;}
   const r=state.route;
@@ -989,45 +989,70 @@ function stopCircuitExperience(){
   if(circuitExperienceState){circuitExperienceState.playToken++;if(circuitExperienceState.raf)cancelAnimationFrame(circuitExperienceState.raf);}
   circuitExperienceState=null;
 }
-function circuitTurnCards(turns,lengthKm){
-  return turns.map(t=>`<button class="circuit-turn-card" data-turn="${t.turn}" onclick="focusCircuitTurn(${t.turn})"><small>TURN</small><b>${t.turn}</b><span>SECTOR ${CIRX.sector(t.turn,turns.length)} · ≈ ${(Number(lengthKm||0)*t.progress).toFixed(2)} km</span></button>`).join('');
+function circuitTurnCards(turns){
+  return turns.map(t=>`<button class="circuit-turn-card" data-turn="${esc(t.id)}" onclick="focusCircuitTurn('${esc(t.id)}')"><small>TURN</small><b>${esc(t.label)}</b><span>${t.sector?`SECTOR ${t.sector} · `:''}${t.distanceM!==null?`${(t.distanceM/1000).toFixed(2)} km`:'F1 TIMING'}</span></button>`).join('');
+}
+function circuitStraightCards(straights){
+  if(!straights?.length)return '';
+  return `<div class="circuit-straight-head"><span>LONG STRAIGHTS</span><small>BETWEEN OFFICIAL CORNERS</small></div><div class="circuit-straight-strip">${straights.map(x=>`<div class="circuit-straight-card"><small>STRAIGHT</small><b>T${esc(x.from)} → T${esc(x.to)}</b><span>≈ ${(x.distanceM/1000).toFixed(2)} km</span></div>`).join('')}</div>`;
 }
 function setCircuitViewBox(target,duration=480){
   const st=circuitExperienceState;if(!st?.svg)return;const svg=st.svg,from=String(svg.getAttribute('viewBox')||st.full.join(' ')).split(/[ ,]+/).map(Number),to=target.map(Number),start=performance.now();if(st.raf)cancelAnimationFrame(st.raf);
   if(matchMedia('(prefers-reduced-motion: reduce)').matches||duration<=0){svg.setAttribute('viewBox',to.join(' '));return;}
   const ease=t=>1-Math.pow(1-t,3);const tick=now=>{const q=Math.min(1,(now-start)/duration),e=ease(q),v=to.map((x,i)=>from[i]+(x-from[i])*e);svg.setAttribute('viewBox',v.join(' '));if(q<1)st.raf=requestAnimationFrame(tick);};st.raf=requestAnimationFrame(tick);
 }
-function focusCircuitTurn(turn,auto=false){
-  const st=circuitExperienceState;if(!st?.turns?.length)return;const t=st.turns.find(x=>x.turn===Number(turn));if(!t)return;st.active=t.turn;
-  setCircuitViewBox(CIRX.focusBox(st.full,t,2.28),auto?420:520);
-  st.root.querySelectorAll('.circuit-turn-card').forEach(el=>el.classList.toggle('active',Number(el.dataset.turn)===t.turn));st.svg.querySelectorAll('.circuit-turn-marker').forEach(el=>el.classList.toggle('active',Number(el.dataset.turn)===t.turn));
-  const card=st.root.querySelector(`.circuit-turn-card[data-turn="${t.turn}"]`);card?.scrollIntoView?.({behavior:auto?'auto':'smooth',block:'nearest',inline:'center'});
-  const hud=st.root.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML=`<b>TURN ${t.turn}</b><span>SECTOR ${CIRX.sector(t.turn,st.turns.length)} · ≈ ${(Number(st.lengthKm||0)*t.progress).toFixed(2)} km</span>`;
+function focusCircuitTurn(id,auto=false){
+  const st=circuitExperienceState;if(!st?.turns?.length)return;const t=st.turns.find(x=>String(x.id)===String(id));if(!t)return;st.active=t.id;
+  setCircuitViewBox(CIRX.focusBox(st.full,t,2.35),auto?390:500);
+  st.root.querySelectorAll('.circuit-turn-card').forEach(el=>el.classList.toggle('active',String(el.dataset.turn)===String(t.id)));st.svg.querySelectorAll('.circuit-turn-marker').forEach(el=>el.classList.toggle('active',String(el.dataset.turn)===String(t.id)));
+  const card=document.querySelector(`.circuit-turn-card[data-turn="${CSS.escape(String(t.id))}"]`);card?.scrollIntoView?.({behavior:auto?'auto':'smooth',block:'nearest',inline:'center'});
+  const hud=document.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML=`<b>TURN ${esc(t.label)}</b><span>${t.sector?`SECTOR ${t.sector} · `:''}${t.distanceM!==null?`${(t.distanceM/1000).toFixed(2)} km from S/F`:'F1 timing corner'}</span>`;
 }
-function resetCircuitCamera(){const st=circuitExperienceState;if(!st)return;st.playToken++;st.active=0;setCircuitViewBox(st.full,520);st.root.querySelectorAll('.circuit-turn-card,.circuit-turn-marker').forEach(x=>x.classList.remove('active'));const hud=st.root.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML='<b>FULL LAP</b><span>Select a turn or play the lap</span>';}
-async function playCircuitLap(){const st=circuitExperienceState;if(!st?.turns?.length)return;const token=++st.playToken;for(const t of st.turns){if(!circuitExperienceState||token!==st.playToken)return;focusCircuitTurn(t.turn,true);await sleep(matchMedia('(prefers-reduced-motion: reduce)').matches?260:720);}if(circuitExperienceState&&token===st.playToken){await sleep(350);resetCircuitCamera();}}
+function resetCircuitCamera(){const st=circuitExperienceState;if(!st)return;st.playToken++;st.active='';setCircuitViewBox(st.full,500);document.querySelectorAll('.circuit-turn-card,.circuit-turn-marker').forEach(x=>x.classList.remove('active'));const hud=document.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML=`<b>FULL LAP</b><span>${st.referenceYear===YEAR?'CURRENT F1 TIMING GEOMETRY':`${st.referenceYear} F1 TIMING REFERENCE`}</span>`;}
+async function playCircuitLap(){const st=circuitExperienceState;if(!st?.turns?.length)return;const token=++st.playToken;for(const t of st.turns){if(!circuitExperienceState||token!==st.playToken)return;focusCircuitTurn(t.id,true);await sleep(matchMedia('(prefers-reduced-motion: reduce)').matches?230:650);}if(circuitExperienceState&&token===st.playToken){await sleep(300);resetCircuitCamera();}}
 window.focusCircuitTurn=focusCircuitTurn;window.resetCircuitCamera=resetCircuitCamera;window.playCircuitLap=playCircuitLap;
+function circuitMeetingMatch(meetings,r,circuitKey){return CIRX?.bestMeeting(meetings,r,circuitKey)||null;}
+async function circuitInfoJSON(url,key){
+  if(!url)throw new Error('circuit-info');
+  try{return await fetchJSON(url,key,30*864e5,18000);}catch{return await fetchJSON(archiveProxyUrl(url),`${key}-proxy`,30*864e5,25000);}
+}
+async function circuitTimingSource(r){
+  const currentMeetings=await fetchJSON(`${OPENF1}/meetings?year=${YEAR}`,`of1-meetings-${YEAR}`,12*3600e3),current=circuitMeetingMatch(currentMeetings,r,null);
+  const candidates=[];if(current)candidates.push({meeting:current,year:YEAR});
+  for(let y=YEAR-1;y>=2023;y--){
+    try{const ms=await fetchJSON(`${OPENF1}/meetings?year=${y}`,`of1-meetings-${y}`,7*864e5),m=circuitMeetingMatch(ms,r,current?.circuit_key);if(m)candidates.push({meeting:m,year:y});}catch{}
+  }
+  for(const cand of candidates){
+    try{const sessions=await fetchJSON(`${OPENF1}/sessions?meeting_key=${cand.meeting.meeting_key}`,`of1-circuit-sessions-${cand.meeting.meeting_key}`,12*3600e3),session=CIRX.chooseSession(sessions);if(session)return {...cand,session};}catch{}
+  }
+  throw new Error('no-timing-session');
+}
+async function loadOfficialCircuitTiming(r,c){
+  const source=await circuitTimingSource(r),meeting=source.meeting,session=source.session,year=source.year;
+  const infoUrl=meeting.circuit_info_url||(`https://api.multiviewer.app/api/v1/circuits/${meeting.circuit_key}/${year}`),info=await circuitInfoJSON(infoUrl,`circuit-info-${meeting.circuit_key}-${year}`),corners=CIRX.corners(info);if(!corners.length)throw new Error('no-corners');
+  const laps=await fetchJSON(`${OPENF1}/laps?session_key=${session.session_key}`,`circuit-laps-${session.session_key}`,7*864e5,20000),valid=(laps||[]).filter(x=>x.date_start&&Number(x.lap_duration)>40&&Number(x.lap_duration)<240&&!x.is_pit_out_lap).sort((a,b)=>Number(a.lap_duration)-Number(b.lap_duration));
+  const lap=valid[0];if(!lap)throw new Error('no-lap');const start=new Date(lap.date_start),end=new Date(start.getTime()+Number(lap.lap_duration)*1000+1800),params=new URLSearchParams();params.set('session_key',session.session_key);params.set('driver_number',lap.driver_number);params.append('date>=',start.toISOString());params.append('date<=',end.toISOString());
+  const loc=await fetchJSON(`${OPENF1}/location?${params.toString()}`,`circuit-location-${session.session_key}-${lap.driver_number}-${lap.lap_number}`,30*864e5,25000),experience=CIRX.officialExperience(loc,corners,Number(info.rotation||0),Number(c.length||0)*1000,lap);if(!experience)throw new Error('no-track');
+  return {...experience,referenceYear:year,meeting,session,lap,straights:CIRX.longStraights(corners,Number(c.length||0)*1000,4)};
+}
+function officialCircuitSvg(exp){
+  const d=exp.track.map((p,i)=>`${i?'L':'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' '),turns=exp.turns.map(t=>`<g class="circuit-turn-marker" data-turn="${esc(t.id)}" transform="translate(${t.x.toFixed(1)} ${t.y.toFixed(1)})" onclick="focusCircuitTurn('${esc(t.id)}')"><circle r="12"></circle><text dy=".34em">${esc(t.label)}</text></g>`).join(''),sectors=exp.sectors.map(s=>`<g class="circuit-sector-marker" transform="translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})"><circle r="8"></circle><text x="12" dy=".34em">${esc(s.label)}</text></g>`).join(''),sf=exp.start?`<g class="circuit-sf-marker" transform="translate(${exp.start.x.toFixed(1)} ${exp.start.y.toFixed(1)})"><line x1="-8" y1="-12" x2="-8" y2="12"></line><line x1="-3" y1="-12" x2="-3" y2="12"></line><text x="7" dy=".34em">S/F</text></g>`:'';
+  return `<svg class="circuit-immersive-svg circuit-official-svg" viewBox="${exp.full.join(' ')}" role="img" aria-label="F1 timing-derived circuit map with official corner numbers and sector boundaries"><path class="circuit-track-shadow" d="${d}"></path><path class="circuit-track-line" d="${d}"></path><g class="circuit-sector-markers">${sectors}${sf}</g><g class="circuit-turn-markers">${turns}</g></svg>`;
+}
 async function loadCircuitExperienceInto(r,c,src){
   const root=document.getElementById('circuit-experience');if(!root)return;stopCircuitExperience();
-  if(!src){root.innerHTML='<div class="circuit-stage-fallback">Circuit layout unavailable.</div>';return;}
   try{
-    const raw=await fetchText(src,`circuit-immersive-${r.Circuit.circuitId}`,30*864e5),doc=new DOMParser().parseFromString(raw,'image/svg+xml'),source=doc.documentElement;if(!source||source.nodeName.toLowerCase()!=='svg')throw 0;
-    source.querySelectorAll('script,foreignObject,iframe').forEach(x=>x.remove());source.querySelectorAll('*').forEach(el=>[...el.attributes].forEach(a=>{if(/^on/i.test(a.name))el.removeAttribute(a.name);}));
-    const svg=document.importNode(source,true);svg.removeAttribute('width');svg.removeAttribute('height');svg.classList.add('circuit-immersive-svg');svg.setAttribute('preserveAspectRatio','xMidYMid meet');root.innerHTML='';root.appendChild(svg);await new Promise(requestAnimationFrame);
-    const main=CIRX.longestPath(svg);if(!main)throw 0;const totalTurns=Math.max(1,Number(c.turns)||12),turns=CIRX.turnCandidates(main.path,main.length,totalTurns),full=CIRX.viewBox(svg),ns='http://www.w3.org/2000/svg',group=document.createElementNS(ns,'g');group.setAttribute('class','circuit-turn-markers');
-    for(const t of turns){const g=document.createElementNS(ns,'g');g.setAttribute('class','circuit-turn-marker');g.dataset.turn=t.turn;g.setAttribute('transform',`translate(${t.x} ${t.y})`);const circle=document.createElementNS(ns,'circle');circle.setAttribute('r',String(Math.max(full[2],full[3])*.018));const text=document.createElementNS(ns,'text');text.setAttribute('dy','.34em');text.textContent=String(t.turn);g.append(circle,text);g.addEventListener('click',()=>focusCircuitTurn(t.turn));group.appendChild(g);}svg.appendChild(group);
-    circuitExperienceState={root,svg,path:main.path,length:main.length,turns,full:[...full],active:0,playToken:0,raf:0,lengthKm:c.length||0};
-    const strip=document.getElementById('circuit-turn-strip');if(strip)strip.innerHTML=circuitTurnCards(turns,c.length||0);const hud=document.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML='<b>FULL LAP</b><span>Select a turn or play the lap</span>';
+    const exp=await loadOfficialCircuitTiming(r,c);root.innerHTML=officialCircuitSvg(exp);const svg=root.querySelector('svg');circuitExperienceState={root,svg,turns:exp.turns,full:[...exp.full],active:'',playToken:0,raf:0,lengthKm:c.length||0,referenceYear:exp.referenceYear};
+    const strip=document.getElementById('circuit-turn-strip');if(strip)strip.innerHTML=circuitTurnCards(exp.turns);const straight=document.getElementById('circuit-straight-zone');if(straight)straight.innerHTML=circuitStraightCards(exp.straights);const hud=document.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML=`<b>FULL LAP</b><span>${exp.referenceYear===YEAR?'CURRENT F1 TIMING GEOMETRY':`${exp.referenceYear} F1 TIMING REFERENCE`}</span>`;const note=document.getElementById('circuit-guide-note');if(note)note.innerHTML=`Corner numbers and positions use F1 timing-derived circuit metadata; S1/S2 are located from the selected official lap sector timestamps. ${exp.referenceYear!==YEAR?`This upcoming layout uses the latest available ${exp.referenceYear} timing reference.`:''}`;
   }catch{
-    root.innerHTML=`<img class="circuit-fallback-img" src="${esc(src)}" alt="${esc(r.Circuit.circuitName)} layout">`;
-    const totalTurns=Math.max(1,Number(c.turns)||12),turns=Array.from({length:totalTurns},(_,i)=>({turn:i+1,progress:(i+.5)/totalTurns})),strip=document.getElementById('circuit-turn-strip');if(strip)strip.innerHTML=turns.map(t=>`<div class="circuit-turn-card static"><small>TURN</small><b>${t.turn}</b><span>SECTOR ${CIRX.sector(t.turn,totalTurns)}</span></div>`).join('');
+    root.innerHTML=src?`<img class="circuit-fallback-img" src="${esc(src)}" alt="${esc(r.Circuit.circuitName)} layout">`:'<div class="circuit-stage-fallback">Circuit layout unavailable.</div>';const strip=document.getElementById('circuit-turn-strip');if(strip)strip.innerHTML='<div class="circuit-official-unavailable">F1 timing corner metadata is unavailable for this circuit right now. F1 Hub will not invent turn positions.</div>';const straight=document.getElementById('circuit-straight-zone');if(straight)straight.innerHTML='';const hud=document.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML='<b>TRACK VIEW</b><span>Official turn guide unavailable</span>';const note=document.getElementById('circuit-guide-note');if(note)note.textContent='Fallback layout only. Turn numbers and sector markers are intentionally hidden rather than estimated.';
   }
 }
 function renderCircuit(round){
   const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('circuits');const c=CIRCUITS[r.Circuit.circuitId]||{},src=circuitSvg(r.Circuit.circuitId);stopCircuitExperience();
   view.innerHTML=`<div class="actions"><button class="external-btn" onclick="setRoute('circuits')">← CIRCUITS</button></div><div class="spacer"></div>${titleBlock(flag(r.Circuit.Location.country)+' '+r.Circuit.Location.country,r.Circuit.circuitName)}
-  <div class="card circuit-experience-card"><div class="circuit-experience-head"><div><div class="eyebrow">IMMERSIVE CIRCUIT VIEW</div><div class="card-title">Explore a lap</div></div><div class="actions"><button class="mini-btn wide" onclick="playCircuitLap()">▶ PLAY LAP</button><button class="mini-btn" onclick="resetCircuitCamera()" aria-label="Reset circuit view">↺</button></div></div><div class="circuit-stage"><div id="circuit-experience" class="circuit-viewport"><div class="loader">Preparing circuit…</div></div><div class="circuit-lap-hud" data-circuit-hud><b>FULL LAP</b><span>Preparing turn guide…</span></div></div><div id="circuit-turn-strip" class="circuit-turn-strip"><div class="loader">Finding turns…</div></div><div class="circuit-guide-note">Turn markers are detected from the circuit SVG geometry to create an interactive lap guide. Select a turn to pan and zoom around the circuit.</div></div>
-  <div class="spacer"></div><div class="card"><div class="facts"><div class="fact"><b>${c.length?c.length.toFixed(3)+' km':'—'}</b><small>LENGTH</small></div><div class="fact"><b>${c.laps??'—'}</b><small>LAPS</small></div><div class="fact"><b>${c.turns??'—'}</b><small>TURNS</small></div><div class="fact"><b>${c.first??'—'}</b><small>FIRST GP</small></div><div class="fact"><b>${c.length&&c.laps?(c.length*c.laps).toFixed(1)+' km':'—'}</b><small>RACE DIST.</small></div><div class="fact"><b>${fmtDate(raceIso(r),{day:'numeric',month:'short'})}</b><small>${YEAR} RACE</small></div></div><div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button><button class="external-btn" onclick="setRoute('race:${r.round}')">RACE HUB</button></div></div><div class="spacer"></div>${titleBlock('HISTORY','Previous Winners')}<div id="circuit-history"><div class="loader">Loading circuit history…</div></div><div class="source-note">Circuit layout: community SVG source. The interactive turn guide is derived from that track geometry; historical winners come from Jolpica/Ergast.</div>`;
+  <div class="card circuit-experience-card"><div class="circuit-experience-head"><div><div class="eyebrow">F1 TIMING CIRCUIT VIEW</div><div class="card-title">Explore an official lap reference</div></div><div class="actions"><button class="mini-btn wide" onclick="playCircuitLap()">▶ PLAY LAP</button><button class="mini-btn" onclick="resetCircuitCamera()" aria-label="Reset circuit view">↺</button></div></div><div class="circuit-stage"><div id="circuit-experience" class="circuit-viewport"><div class="loader">Loading F1 timing geometry…</div></div><div class="circuit-lap-hud" data-circuit-hud><b>FULL LAP</b><span>Loading official corner metadata…</span></div></div><div id="circuit-turn-strip" class="circuit-turn-strip"><div class="loader">Loading corners…</div></div><div id="circuit-straight-zone"></div><div id="circuit-guide-note" class="circuit-guide-note">Loading F1 timing-derived corner and sector data…</div></div>
+  <div class="spacer"></div><div class="card"><div class="facts"><div class="fact"><b>${c.length?c.length.toFixed(3)+' km':'—'}</b><small>LENGTH</small></div><div class="fact"><b>${c.laps??'—'}</b><small>LAPS</small></div><div class="fact"><b>${c.turns??'—'}</b><small>TURNS</small></div><div class="fact"><b>${c.first??'—'}</b><small>FIRST GP</small></div><div class="fact"><b>${c.length&&c.laps?(c.length*c.laps).toFixed(1)+' km':'—'}</b><small>RACE DIST.</small></div><div class="fact"><b>${fmtDate(raceIso(r),{day:'numeric',month:'short'})}</b><small>${YEAR} RACE</small></div></div><div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button><button class="external-btn" onclick="setRoute('race:${r.round}')">RACE HUB</button></div></div><div class="spacer"></div>${titleBlock('HISTORY','Previous Winners')}<div id="circuit-history"><div class="loader">Loading circuit history…</div></div><div class="source-note">Corner numbering and timing geometry are loaded from the circuit metadata URL exposed with OpenF1 meetings and the same MultiViewer circuit dataset used by FastF1. Track position comes from historical OpenF1 location telemetry; S1/S2 use lap-sector timestamps. Historical winners come from Jolpica/Ergast.</div>`;
   loadCircuitExperienceInto(r,c,src);loadCircuitHistoryInto(r);
 }
 async function loadCircuitHistoryInto(r){
@@ -1379,9 +1404,9 @@ const OFFICIAL_SCHEMATIC_MARKERS={
   'front-wing':{x:46.0,y:86.0,view:'SIDE',labelDx:1.2,labelDy:-3.2},
   'nose':{x:48.0,y:35.5,view:'TOP',labelDx:1.0,labelDy:-3.0},
   'front-corner':{x:28.5,y:80.5,view:'FRONT',labelDx:2.1,labelDy:-2.8},
-  'floor-fences':{x:63.0,y:39.0,view:'TOP',labelDx:1.3,labelDy:-3.2},
+  'floor-fences':{x:58.6,y:43.0,view:'TOP',labelDx:1.3,labelDy:-3.2},
   'sidepod':{x:67.0,y:83.5,view:'SIDE',labelDx:1.5,labelDy:-3.2},
-  'floor':{x:70.4,y:34.1,view:'TOP',labelDx:1.15,labelDy:-3.2},
+  'floor':{x:70.8,y:43.5,view:'TOP',labelDx:1.15,labelDy:-3.2},
   'cooling':{x:75.0,y:27.0,view:'TOP',labelDx:1.3,labelDy:-3.0},
   'cockpit':{x:69.0,y:35.0,view:'TOP',labelDx:1.3,labelDy:-3.2},
   'rear-corner':{x:88.0,y:85.0,view:'SIDE',labelDx:-2.0,labelDy:-3.0},

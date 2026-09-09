@@ -22,7 +22,7 @@ const JINA = 'https://r.jina.ai/';
 const MOTORSPORT_STANDINGS = `https://www.motorsport.com/f1/standings/${YEAR}/`;
 const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const APP_VERSION = '1.22.0';
+const APP_VERSION = '1.23.0';
 const Q = globalThis.F1HubQuality;
 const CD = globalThis.F1HubCarDevelopment;
 const CAREER = globalThis.F1HubDriverCareer;
@@ -307,8 +307,6 @@ async function loadWikipediaPhotos(force=false){
 function highResDriverPhoto(url){
   const u=String(url||'');
   if(!u)return '';
-  // OpenF1 commonly returns Formula1.com's compact 1-column DAM rendition.
-  // Request a larger responsive rendition first while retaining the original URL as fallback.
   if(/\.transform\/1col\/image\./i.test(u))return u.replace(/\.transform\/1col\/image\./i,'.transform/4col/image.');
   return u;
 }
@@ -714,6 +712,7 @@ function setRoute(route,push=true,motion=''){ if(!route)return; const changed=ro
 function render(){
   clearInterval(state.countdownTimer);clearInterval(state.radarTimer);state.radarTimer=null;
   document.body.classList.remove('compare-route');
+  document.body.classList.toggle('compare-page-active',state.route==='compare');
   if(!String(state.route||'').startsWith('circuit:'))stopCircuitExperience();
   if(!state.loaded){view.innerHTML='<div class="loader">Loading F1 Hub…</div>';return;}
   const r=state.route;
@@ -1011,6 +1010,26 @@ function focusCircuitTurn(id,auto=false){
 function resetCircuitCamera(){const st=circuitExperienceState;if(!st)return;st.playToken++;st.active='';setCircuitViewBox(st.full,500);document.querySelectorAll('.circuit-turn-card,.circuit-turn-marker').forEach(x=>x.classList.remove('active'));const hud=document.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML=`<b>FULL LAP</b><span>${st.referenceYear===YEAR?'CURRENT F1 TIMING GEOMETRY':`${st.referenceYear} F1 TIMING REFERENCE`}</span>`;}
 async function playCircuitLap(){const st=circuitExperienceState;if(!st?.turns?.length)return;const token=++st.playToken;for(const t of st.turns){if(!circuitExperienceState||token!==st.playToken)return;focusCircuitTurn(t.id,true);await sleep(matchMedia('(prefers-reduced-motion: reduce)').matches?230:650);}if(circuitExperienceState&&token===st.playToken){await sleep(300);resetCircuitCamera();}}
 window.focusCircuitTurn=focusCircuitTurn;window.resetCircuitCamera=resetCircuitCamera;window.playCircuitLap=playCircuitLap;
+const TRACING_CIRCUIT_BASE='https://raw.githubusercontent.com/TracingInsights';
+function tracingCircuitEventNames(r){
+  const id=r?.Circuit?.circuitId||'';
+  const special={
+    catalunya:['Barcelona Grand Prix','Spanish Grand Prix'],
+    rodriguez:['Mexico City Grand Prix','Mexican Grand Prix'],
+    interlagos:['São Paulo Grand Prix','Sao Paulo Grand Prix','Brazilian Grand Prix'],
+    madring:['Spanish Grand Prix'],sepang:['Malaysian Grand Prix']
+  };
+  return [...new Set([...(special[id]||[]),r?.raceName].filter(Boolean))];
+}
+async function tracingCircuitCorners(r,preferredYears=[]){
+  const years=[...new Set([...preferredYears,YEAR,YEAR-1,YEAR-2,2024,2023].map(Number).filter(y=>y>=2018&&y<=YEAR))];
+  const events=tracingCircuitEventNames(r),sessions=['Race','Qualifying','Practice 3','Practice 1'];
+  for(const year of years){for(const event of events){for(const session of sessions){
+    const url=`${TRACING_CIRCUIT_BASE}/${year}/main/${encodeURIComponent(event)}/${encodeURIComponent(session)}/corners.json`;
+    try{const payload=await fetchJSON(url,`trace-corners-${year}-${event}-${session}`,30*864e5,9000),rows=CIRX.tracingCorners(payload);if(rows.length)return {rows,rotation:Number(payload?.Rotation||0),year,event,session,url};}catch{}
+  }}}
+  return null;
+}
 function circuitMeetingMatch(meetings,r,circuitKey){return CIRX?.bestMeeting(meetings,r,circuitKey)||null;}
 async function circuitInfoJSON(url,key){
   if(!url)throw new Error('circuit-info');
@@ -1028,30 +1047,43 @@ async function circuitTimingSource(r){
   throw new Error('no-timing-session');
 }
 async function loadOfficialCircuitTiming(r,c){
-  const source=await circuitTimingSource(r),meeting=source.meeting,session=source.session,year=source.year;
-  const infoUrl=meeting.circuit_info_url||(`https://api.multiviewer.app/api/v1/circuits/${meeting.circuit_key}/${year}`),info=await circuitInfoJSON(infoUrl,`circuit-info-${meeting.circuit_key}-${year}`),corners=CIRX.corners(info);if(!corners.length)throw new Error('no-corners');
-  const laps=await fetchJSON(`${OPENF1}/laps?session_key=${session.session_key}`,`circuit-laps-${session.session_key}`,7*864e5,20000),valid=(laps||[]).filter(x=>x.date_start&&Number(x.lap_duration)>40&&Number(x.lap_duration)<240&&!x.is_pit_out_lap).sort((a,b)=>Number(a.lap_duration)-Number(b.lap_duration));
-  const lap=valid[0];if(!lap)throw new Error('no-lap');const start=new Date(lap.date_start),end=new Date(start.getTime()+Number(lap.lap_duration)*1000+1800),params=new URLSearchParams();params.set('session_key',session.session_key);params.set('driver_number',lap.driver_number);params.append('date>=',start.toISOString());params.append('date<=',end.toISOString());
-  const loc=await fetchJSON(`${OPENF1}/location?${params.toString()}`,`circuit-location-${session.session_key}-${lap.driver_number}-${lap.lap_number}`,30*864e5,25000),experience=CIRX.officialExperience(loc,corners,Number(info.rotation||0),Number(c.length||0)*1000,lap);if(!experience)throw new Error('no-track');
-  return {...experience,referenceYear:year,meeting,session,lap,straights:CIRX.longStraights(corners,Number(c.length||0)*1000,4)};
+  const sourcePromise=circuitTimingSource(r).catch(()=>null),tracePromise=tracingCircuitCorners(r,[YEAR]);
+  const trace=await tracePromise;let source=trace?await Promise.race([sourcePromise,timeoutValue(2500,null)]):await sourcePromise;
+  const meeting=source?.meeting||null,session=source?.session||null,sourceYear=source?.year||trace?.year||YEAR;
+  let corners=[],rotation=0,cornerSource='',cornerYear=sourceYear;
+  if(meeting){try{const infoUrl=meeting.circuit_info_url||(`https://api.multiviewer.app/api/v1/circuits/${meeting.circuit_key}/${sourceYear}`),info=await circuitInfoJSON(infoUrl,`circuit-info-${meeting.circuit_key}-${sourceYear}`);corners=CIRX.corners(info);rotation=Number(info.rotation||0);if(corners.length)cornerSource='MultiViewer / FastF1 circuit metadata';}catch{}}
+  if(!corners.length&&trace){corners=trace.rows;rotation=trace.rotation;cornerYear=trace.year;cornerSource=`TracingInsights ${trace.year} FastF1/MultiViewer archive`;}
+  if(!corners.length){const lateTrace=await tracingCircuitCorners(r,[sourceYear]);if(lateTrace){corners=lateTrace.rows;rotation=lateTrace.rotation;cornerYear=lateTrace.year;cornerSource=`TracingInsights ${lateTrace.year} FastF1/MultiViewer archive`;}}
+  if(!corners.length)throw new Error('no-corners');
+  let experience=null,lap=null;
+  if(session){
+    try{
+      const laps=await fetchJSON(`${OPENF1}/laps?session_key=${session.session_key}`,`circuit-laps-${session.session_key}`,7*864e5,16000),valid=(laps||[]).filter(x=>x.date_start&&Number(x.lap_duration)>40&&Number(x.lap_duration)<240&&!x.is_pit_out_lap).sort((a,b)=>Number(a.lap_duration)-Number(b.lap_duration));
+      lap=valid[0]||null;
+      if(lap){const start=new Date(lap.date_start),end=new Date(start.getTime()+Number(lap.lap_duration)*1000+1800),params=new URLSearchParams();params.set('session_key',session.session_key);params.set('driver_number',lap.driver_number);params.append('date>=',start.toISOString());params.append('date<=',end.toISOString());const loc=await fetchJSON(`${OPENF1}/location?${params.toString()}`,`circuit-location-${session.session_key}-${lap.driver_number}-${lap.lap_number}`,30*864e5,18000);experience=CIRX.officialExperience(loc,corners,rotation,Number(c.length||0)*1000,lap);}
+    }catch{}
+  }
+  if(!experience)experience=CIRX.cornerOnlyExperience(corners,rotation,Number(c.length||0)*1000);
+  if(!experience)throw new Error('no-track');
+  return {...experience,referenceYear:cornerYear,meeting,session,lap,cornerSource,geometryMode:lap&&experience.sectors?.length?'lap-trace':'corner-reference',straights:CIRX.longStraights(corners,Number(c.length||0)*1000,4)};
 }
 function officialCircuitSvg(exp){
   const d=exp.track.map((p,i)=>`${i?'L':'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' '),turns=exp.turns.map(t=>`<g class="circuit-turn-marker" data-turn="${esc(t.id)}" transform="translate(${t.x.toFixed(1)} ${t.y.toFixed(1)})" onclick="focusCircuitTurn('${esc(t.id)}')"><circle r="12"></circle><text dy=".34em">${esc(t.label)}</text></g>`).join(''),sectors=exp.sectors.map(s=>`<g class="circuit-sector-marker" transform="translate(${s.x.toFixed(1)} ${s.y.toFixed(1)})"><circle r="8"></circle><text x="12" dy=".34em">${esc(s.label)}</text></g>`).join(''),sf=exp.start?`<g class="circuit-sf-marker" transform="translate(${exp.start.x.toFixed(1)} ${exp.start.y.toFixed(1)})"><line x1="-8" y1="-12" x2="-8" y2="12"></line><line x1="-3" y1="-12" x2="-3" y2="12"></line><text x="7" dy=".34em">S/F</text></g>`:'';
-  return `<svg class="circuit-immersive-svg circuit-official-svg" viewBox="${exp.full.join(' ')}" role="img" aria-label="F1 timing-derived circuit map with official corner numbers and sector boundaries"><path class="circuit-track-shadow" d="${d}"></path><path class="circuit-track-line" d="${d}"></path><g class="circuit-sector-markers">${sectors}${sf}</g><g class="circuit-turn-markers">${turns}</g></svg>`;
+  return `<svg class="circuit-immersive-svg circuit-official-svg" viewBox="${exp.full.join(' ')}" role="img" aria-label="F1 timing-derived circuit map with numbered corners and sector boundaries"><path class="circuit-track-shadow" d="${d}"></path><path class="circuit-track-line" d="${d}"></path><g class="circuit-sector-markers">${sectors}${sf}</g><g class="circuit-turn-markers">${turns}</g></svg>`;
 }
 async function loadCircuitExperienceInto(r,c,src){
   const root=document.getElementById('circuit-experience');if(!root)return;stopCircuitExperience();
   try{
     const exp=await loadOfficialCircuitTiming(r,c);root.innerHTML=officialCircuitSvg(exp);const svg=root.querySelector('svg');circuitExperienceState={root,svg,turns:exp.turns,full:[...exp.full],active:'',playToken:0,raf:0,lengthKm:c.length||0,referenceYear:exp.referenceYear};
-    const strip=document.getElementById('circuit-turn-strip');if(strip)strip.innerHTML=circuitTurnCards(exp.turns);const straight=document.getElementById('circuit-straight-zone');if(straight)straight.innerHTML=circuitStraightCards(exp.straights);const hud=document.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML=`<b>FULL LAP</b><span>${exp.referenceYear===YEAR?'CURRENT F1 TIMING GEOMETRY':`${exp.referenceYear} F1 TIMING REFERENCE`}</span>`;const note=document.getElementById('circuit-guide-note');if(note)note.innerHTML=`Corner numbers and positions use F1 timing-derived circuit metadata; S1/S2 are located from the selected official lap sector timestamps. ${exp.referenceYear!==YEAR?`This upcoming layout uses the latest available ${exp.referenceYear} timing reference.`:''}`;
+    const strip=document.getElementById('circuit-turn-strip');if(strip)strip.innerHTML=circuitTurnCards(exp.turns);const straight=document.getElementById('circuit-straight-zone');if(straight)straight.innerHTML=circuitStraightCards(exp.straights);const hud=document.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML=`<b>FULL LAP</b><span>${exp.referenceYear===YEAR?'CURRENT F1 CORNER REFERENCE':`${exp.referenceYear} F1 CORNER REFERENCE`}</span>`;const note=document.getElementById('circuit-guide-note');if(note)note.innerHTML=`Turn numbers/positions come from ${esc(exp.cornerSource||'FastF1/MultiViewer circuit metadata')}. ${exp.geometryMode==='lap-trace'?'The track line and S1/S2 markers use a real historical OpenF1 lap trace and sector timestamps.':'The turn guide uses archived FastF1/MultiViewer corner coordinates; sector markers are hidden because a validated lap trace was not available.'} ${exp.referenceYear!==YEAR?`This layout uses the latest available ${exp.referenceYear} reference.`:''}`;
   }catch{
-    root.innerHTML=src?`<img class="circuit-fallback-img" src="${esc(src)}" alt="${esc(r.Circuit.circuitName)} layout">`:'<div class="circuit-stage-fallback">Circuit layout unavailable.</div>';const strip=document.getElementById('circuit-turn-strip');if(strip)strip.innerHTML='<div class="circuit-official-unavailable">F1 timing corner metadata is unavailable for this circuit right now. F1 Hub will not invent turn positions.</div>';const straight=document.getElementById('circuit-straight-zone');if(straight)straight.innerHTML='';const hud=document.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML='<b>TRACK VIEW</b><span>Official turn guide unavailable</span>';const note=document.getElementById('circuit-guide-note');if(note)note.textContent='Fallback layout only. Turn numbers and sector markers are intentionally hidden rather than estimated.';
+    root.innerHTML=src?`<img class="circuit-fallback-img" src="${esc(src)}" alt="${esc(r.Circuit.circuitName)} layout">`:'<div class="circuit-stage-fallback">Circuit layout unavailable.</div>';const strip=document.getElementById('circuit-turn-strip');if(strip)strip.innerHTML='<div class="circuit-official-unavailable">F1 timing corner metadata is unavailable for this circuit right now. F1 Hub will not invent turn positions.</div>';const straight=document.getElementById('circuit-straight-zone');if(straight)straight.innerHTML='';const hud=document.querySelector('[data-circuit-hud]');if(hud)hud.innerHTML='<b>TRACK VIEW</b><span>Turn guide unavailable</span>';const note=document.getElementById('circuit-guide-note');if(note)note.textContent='Fallback layout only. Turn numbers and sector markers are intentionally hidden rather than estimated.';
   }
 }
 function renderCircuit(round){
   const r=state.schedule.find(x=>x.round===round);if(!r)return setRoute('circuits');const c=CIRCUITS[r.Circuit.circuitId]||{},src=circuitSvg(r.Circuit.circuitId);stopCircuitExperience();
   view.innerHTML=`<div class="actions"><button class="external-btn" onclick="setRoute('circuits')">← CIRCUITS</button></div><div class="spacer"></div>${titleBlock(flag(r.Circuit.Location.country)+' '+r.Circuit.Location.country,r.Circuit.circuitName)}
-  <div class="card circuit-experience-card"><div class="circuit-experience-head"><div><div class="eyebrow">F1 TIMING CIRCUIT VIEW</div><div class="card-title">Explore an official lap reference</div></div><div class="actions"><button class="mini-btn wide" onclick="playCircuitLap()">▶ PLAY LAP</button><button class="mini-btn" onclick="resetCircuitCamera()" aria-label="Reset circuit view">↺</button></div></div><div class="circuit-stage"><div id="circuit-experience" class="circuit-viewport"><div class="loader">Loading F1 timing geometry…</div></div><div class="circuit-lap-hud" data-circuit-hud><b>FULL LAP</b><span>Loading official corner metadata…</span></div></div><div id="circuit-turn-strip" class="circuit-turn-strip"><div class="loader">Loading corners…</div></div><div id="circuit-straight-zone"></div><div id="circuit-guide-note" class="circuit-guide-note">Loading F1 timing-derived corner and sector data…</div></div>
+  <div class="card circuit-experience-card"><div class="circuit-experience-head"><div><div class="eyebrow">F1 TIMING CIRCUIT VIEW</div><div class="card-title">Explore an F1 timing lap reference</div></div><div class="actions"><button class="mini-btn wide" onclick="playCircuitLap()">▶ PLAY LAP</button><button class="mini-btn" onclick="resetCircuitCamera()" aria-label="Reset circuit view">↺</button></div></div><div class="circuit-stage"><div id="circuit-experience" class="circuit-viewport"><div class="loader">Loading F1 timing geometry…</div></div><div class="circuit-lap-hud" data-circuit-hud><b>FULL LAP</b><span>Loading official corner metadata…</span></div></div><div id="circuit-turn-strip" class="circuit-turn-strip"><div class="loader">Loading corners…</div></div><div id="circuit-straight-zone"></div><div id="circuit-guide-note" class="circuit-guide-note">Loading F1 timing-derived corner and sector data…</div></div>
   <div class="spacer"></div><div class="card"><div class="facts"><div class="fact"><b>${c.length?c.length.toFixed(3)+' km':'—'}</b><small>LENGTH</small></div><div class="fact"><b>${c.laps??'—'}</b><small>LAPS</small></div><div class="fact"><b>${c.turns??'—'}</b><small>TURNS</small></div><div class="fact"><b>${c.first??'—'}</b><small>FIRST GP</small></div><div class="fact"><b>${c.length&&c.laps?(c.length*c.laps).toFixed(1)+' km':'—'}</b><small>RACE DIST.</small></div><div class="fact"><b>${fmtDate(raceIso(r),{day:'numeric',month:'short'})}</b><small>${YEAR} RACE</small></div></div><div class="spacer"></div><div class="actions"><button class="external-btn red" onclick="setRoute('radar:${r.round}')">RAIN RADAR</button><button class="external-btn" onclick="setRoute('race:${r.round}')">RACE HUB</button></div></div><div class="spacer"></div>${titleBlock('HISTORY','Previous Winners')}<div id="circuit-history"><div class="loader">Loading circuit history…</div></div><div class="source-note">Corner numbering and timing geometry are loaded from the circuit metadata URL exposed with OpenF1 meetings and the same MultiViewer circuit dataset used by FastF1. Track position comes from historical OpenF1 location telemetry; S1/S2 use lap-sector timestamps. Historical winners come from Jolpica/Ergast.</div>`;
   loadCircuitExperienceInto(r,c,src);loadCircuitHistoryInto(r);
 }
@@ -1399,14 +1431,12 @@ function parseCarPresentation(raw){
 
 function carTeamSlug(name){return String(name||'team').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');}
 const OFFICIAL_SCHEMATIC_MARKERS={
-  // Coordinates target the actual component on the supplied four-view 2026 reference.
-  // The numbered label is offset from this pin so it does not obscure the drawing.
   'front-wing':{x:46.0,y:86.0,view:'SIDE',labelDx:1.2,labelDy:-3.2},
   'nose':{x:48.0,y:35.5,view:'TOP',labelDx:1.0,labelDy:-3.0},
   'front-corner':{x:28.5,y:80.5,view:'FRONT',labelDx:2.1,labelDy:-2.8},
-  'floor-fences':{x:58.6,y:43.0,view:'TOP',labelDx:1.3,labelDy:-3.2},
+  'floor-fences':{x:58.5,y:87.0,view:'SIDE',labelDx:1.3,labelDy:-3.2},
   'sidepod':{x:67.0,y:83.5,view:'SIDE',labelDx:1.5,labelDy:-3.2},
-  'floor':{x:70.8,y:43.5,view:'TOP',labelDx:1.15,labelDy:-3.2},
+  'floor':{x:71.5,y:89.2,view:'SIDE',labelDx:1.15,labelDy:-3.2},
   'cooling':{x:75.0,y:27.0,view:'TOP',labelDx:1.3,labelDy:-3.0},
   'cockpit':{x:69.0,y:35.0,view:'TOP',labelDx:1.3,labelDy:-3.2},
   'rear-corner':{x:88.0,y:85.0,view:'SIDE',labelDx:-2.0,labelDy:-3.0},
@@ -1417,7 +1447,6 @@ const OFFICIAL_SCHEMATIC_MARKERS={
 };
 function schematicMarkerPoint(zoneId,stackIndex){
   const base=OFFICIAL_SCHEMATIC_MARKERS[zoneId]||{x:50,y:50,view:'MAP',labelDx:1.3,labelDy:-3};
-  // Same-zone updates separate only slightly; the target pin stays on the real component.
   const offsets=[[0,0],[.7,.7],[-.7,-.7],[1.0,-.6],[-1.0,.6],[0,1.1]];
   const off=offsets[stackIndex%offsets.length]||[0,0];
   return {x:Math.max(4,Math.min(96,base.x+off[0])),y:Math.max(6,Math.min(94,base.y+off[1])),view:base.view,labelDx:base.labelDx||1.3,labelDy:base.labelDy||-3};
@@ -1490,7 +1519,6 @@ function findAnyCarPresentationLink(raw){
   return null;
 }
 async function discoverHistoricalCarPresentation(r){
-  // FIA keeps event-specific decision-document pages after a weekend has left the main documents page.
   for(const eventName of fiaCarPresentationEventNames(r)){
     const eventUrl=`https://www.fia.com/documents/championship/event/${encodeURIComponent(eventName)}`;
     try{
@@ -1499,7 +1527,6 @@ async function discoverHistoricalCarPresentation(r){
       if(found)return {...found,eventUrl,archive:true};
     }catch{}
   }
-  // FIA decision PDFs use a predictable filename. Probe those only after the event-page discovery route.
   for(const url of fiaDirectCarPresentationUrls(r)){
     try{
       const raw=await fetchText(JINA+url,`fia-car-probe-${YEAR}-${r.round}-${url.split('/').pop()}`,30*24*3600e3);
@@ -1511,12 +1538,10 @@ async function discoverHistoricalCarPresentation(r){
 async function getCarUpdateDoc(r){
   const cached=state.carUpdateDocs[String(r.round)];if(cached)return cached;
   let doc=null;
-  // The main FIA documents page is fastest for the current weekend.
   try{
     const text=await fetchText(JINA+FIA_DOCS,'fia-docs',20*60e3);
     doc=findCarPresentationLink(text,r);
   }catch{}
-  // Historical rounds live on their FIA event archive pages, not the current documents landing page.
   if(!doc)doc=await discoverHistoricalCarPresentation(r);
   if(doc)state.carUpdateDocs[String(r.round)]=doc;
   return doc;
@@ -2141,40 +2166,38 @@ function compareSummaryCard(a,b,h){
   const leader=Number(a.points||0)===Number(b.points||0)?'Points level':`${Number(a.points||0)>Number(b.points||0)?a.code:b.code} leads by ${pointDiff} point${pointDiff===1?'':'s'}`;
   return `<div class="card compare-summary-card"><div class="eyebrow">HEAD TO HEAD</div><div class="compare-summary-lead">${esc(leader)}</div><div class="compare-summary-grid"><div><b>${h.qA}</b><small>${esc(a.code)} QUALI WINS</small></div><div><b>${h.qB}</b><small>${esc(b.code)} QUALI WINS</small></div><div><b>${h.raceA}</b><small>${esc(a.code)} RACE WINS</small></div><div><b>${h.raceB}</b><small>${esc(b.code)} RACE WINS</small></div></div></div>`;
 }
+function timeoutValue(ms,value=null){return new Promise(resolve=>setTimeout(()=>resolve(value),ms));}
+function cachedCompareSeasonData(){
+  const races=(state.raceHistory?.length?state.raceHistory:cacheGet('all-results'))||[];
+  const qualifying=cacheGet('all-qualifying')||[];
+  return [Array.isArray(races)?races:[],Array.isArray(qualifying)?qualifying:[]];
+}
+async function getCompareSeasonData(){
+  let [races,qualifying]=cachedCompareSeasonData();
+  const result=await Promise.race([Promise.allSettled([fetchPaged('results'),fetchPaged('qualifying')]),timeoutValue(12000,null)]);
+  if(result){if(result[0]?.status==='fulfilled'&&result[0].value?.length)races=result[0].value;if(result[1]?.status==='fulfilled'&&result[1].value?.length)qualifying=result[1].value;}
+  if(races?.length){state.raceHistory=races;}
+  return [races||[],qualifying||[]];
+}
+async function getCompareSprints(){
+  const cached=cacheGet('compare-sprints')||[];
+  const result=await Promise.race([fetchSeasonSprints().catch(()=>null),timeoutValue(7000,null)]);
+  if(Array.isArray(result)){cachePut('compare-sprints',result);return result;}
+  return Array.isArray(cached)?cached:[];
+}
+function buildCompareResultHtml(aId,bId,races=[],quali=[],sprints=[]){
+  const byId=Object.fromEntries(state.drivers.map(s=>[s.Driver.driverId,s])),sa=byId[aId],sb=byId[bId];if(!sa||!sb)return '<div class="error-box">Driver data is unavailable.</div>';
+  const aa=simpleDriverStats(aId,races,quali,byId),bb=simpleDriverStats(bId,races,quali,byId),h=pairHeadToHead(aId,bId,races,quali),evo=pointsEvolution([aId,bId],races,sprints),labels={[aId]:aa.code,[bId]:bb.code},teamA=teamColour(sa.Constructors?.at(-1)?.name||''),rawB=teamColour(sb.Constructors?.at(-1)?.name||''),teamB=teamA.toLowerCase()===rawB.toLowerCase()?'#f1f1f1':rawB,colours={a:teamA,b:teamB,[aId]:teamA,[bId]:teamB};
+  const metrics=[compareMetricBar('POINTS',aa.points,bb.points,{aCode:aa.code,bCode:bb.code}),compareMetricBar('WINS',aa.wins,bb.wins,{aCode:aa.code,bCode:bb.code}),compareMetricBar('PODIUMS',aa.pod,bb.pod,{aCode:aa.code,bCode:bb.code}),compareMetricBar('POLES',aa.poles,bb.poles,{aCode:aa.code,bCode:bb.code}),compareMetricBar('DNFS',aa.dnfs,bb.dnfs,{aCode:aa.code,bCode:bb.code,higher:false}),compareMetricBar('AVG FINISH',aa.avgFNum,bb.avgFNum,{aCode:aa.code,bCode:bb.code,higher:false}),compareMetricBar('AVG QUALI',aa.avgQNum,bb.avgQNum,{aCode:aa.code,bCode:bb.code,higher:false})].join('');
+  return `${compareOverviewGraphic(aa,bb,colours)}<div class="spacer"></div>${compareSummaryCard(aa,bb,h)}<div class="spacer"></div><div class="grid desktop-two compare-deck"><div>${compareRadarSvg(aa,bb,colours)}</div><div class="card compare-metrics-card"><div class="eyebrow">METRICS</div>${metrics}</div></div><div class="spacer"></div><div class="grid two compare-hero-grid">${compareDriverHero(aa,sa,colours.a)}${compareDriverHero(bb,sb,colours.b)}</div><div class="spacer"></div>${evolutionChart(evo.series,labels,colours)}<div class="spacer"></div><div class="actions"><button class="external-btn" onclick="shareText('F1 Hub driver comparison','${aa.code} vs ${bb.code}: ${aa.points}-${bb.points} pts, qualifying H2H ${h.qA}-${h.qB}, race H2H ${h.raceA}-${h.raceB}.')">SHARE COMPARISON</button></div>`;
+}
 function renderCompare(){
-  const opts=state.drivers.map(s=>`<option value="${esc(s.Driver.driverId)}">${esc(fullName(s.Driver))}</option>`).join('');
-  const defaultA=state.drivers[0]?.Driver?.driverId||'',defaultB=state.drivers[1]?.Driver?.driverId||defaultA;
-  if(!state.compareA)state.compareA=defaultA;
-  if(!state.compareB||state.compareB===state.compareA)state.compareB=defaultB;
+  const opts=state.drivers.map(s=>`<option value="${esc(s.Driver.driverId)}">${esc(fullName(s.Driver))}</option>`).join(''),defaultA=state.drivers[0]?.Driver?.driverId||'',defaultB=state.drivers[1]?.Driver?.driverId||defaultA;if(!state.compareA)state.compareA=defaultA;if(!state.compareB||state.compareB===state.compareA)state.compareB=defaultB;
   view.innerHTML=`<div class="compare-page" data-no-swipe>${titleBlock(`${YEAR} SEASON`,'Driver Compare')}<div class="card compare-form-card"><div class="grid two"><label><div class="eyebrow">DRIVER A</div><select id="cmp-a">${opts}</select></label><label><div class="eyebrow">DRIVER B</div><select id="cmp-b">${opts}</select></label></div><div class="spacer"></div><button id="cmp-go" class="external-btn red">COMPARE</button></div><div id="cmp-out" class="spacer">${state.compareBusy?'<div class="loader">Comparing…</div>':state.compareResultHtml}</div></div>`;
-  const a=document.getElementById('cmp-a'),b=document.getElementById('cmp-b'),out=document.getElementById('cmp-out');
-  if(a&&[...a.options].some(o=>o.value===state.compareA))a.value=state.compareA;
-  if(b&&[...b.options].some(o=>o.value===state.compareB))b.value=state.compareB;
-  a?.addEventListener('change',()=>{state.compareA=a.value});
-  b?.addEventListener('change',()=>{state.compareB=b.value});
-  document.getElementById('cmp-go').onclick=async()=>{
-    state.compareA=a.value;state.compareB=b.value;
-    if(a.value===b.value){state.compareResultHtml='<div class="error-box">Choose two different drivers.</div>';out.innerHTML=state.compareResultHtml;return;}
-    state.compareBusy=true;out.innerHTML='<div class="loader">Comparing…</div>';
-    out.scrollIntoView?.({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
-    try{
-      const [[races,quali],sprints]=await Promise.all([getSeasonData(),fetchSeasonSprints()]);
-      const byId=Object.fromEntries(state.drivers.map(s=>[s.Driver.driverId,s]));
-      const sa=byId[a.value],sb=byId[b.value],aa=simpleDriverStats(a.value,races,quali,byId),bb=simpleDriverStats(b.value,races,quali,byId),h=pairHeadToHead(a.value,b.value,races,quali),evo=pointsEvolution([a.value,b.value],races,sprints),labels={[a.value]:aa.code,[b.value]:bb.code};
-      const teamA=teamColour(sa?.Constructors?.at(-1)?.name||''),teamBRaw=teamColour(sb?.Constructors?.at(-1)?.name||''),teamB=teamA.toLowerCase()===teamBRaw.toLowerCase()?'#f1f1f1':teamBRaw,colours={a:teamA,b:teamB,[a.value]:teamA,[b.value]:teamB};
-      const metrics=[
-        compareMetricBar('POINTS',aa.points,bb.points,{aCode:aa.code,bCode:bb.code}),
-        compareMetricBar('WINS',aa.wins,bb.wins,{aCode:aa.code,bCode:bb.code}),
-        compareMetricBar('PODIUMS',aa.pod,bb.pod,{aCode:aa.code,bCode:bb.code}),
-        compareMetricBar('POLES',aa.poles,bb.poles,{aCode:aa.code,bCode:bb.code}),
-        compareMetricBar('DNFS',aa.dnfs,bb.dnfs,{aCode:aa.code,bCode:bb.code,higher:false}),
-        compareMetricBar('AVG FINISH',aa.avgFNum,bb.avgFNum,{aCode:aa.code,bCode:bb.code,higher:false}),
-        compareMetricBar('AVG QUALI',aa.avgQNum,bb.avgQNum,{aCode:aa.code,bCode:bb.code,higher:false})
-      ].join('');
-      state.compareResultHtml=`${compareOverviewGraphic(aa,bb,colours)}<div class="spacer"></div>${compareSummaryCard(aa,bb,h)}<div class="spacer"></div><div class="grid desktop-two compare-deck"><div>${compareRadarSvg(aa,bb,colours)}</div><div class="card compare-metrics-card"><div class="eyebrow">METRICS</div>${metrics}</div></div><div class="spacer"></div><div class="grid two compare-hero-grid">${compareDriverHero(aa,sa,colours.a)}${compareDriverHero(bb,sb,colours.b)}</div><div class="spacer"></div>${evolutionChart(evo.series,labels,colours)}<div class="spacer"></div><div class="actions"><button class="external-btn" onclick="shareText('F1 Hub driver comparison','${aa.code} vs ${bb.code}: ${aa.points}-${bb.points} pts, qualifying H2H ${h.qA}-${h.qB}, race H2H ${h.raceA}-${h.raceB}.')">SHARE COMPARISON</button></div>`;
-      out.innerHTML=state.compareResultHtml;
-    }catch{state.compareResultHtml='<div class="error-box">Could not load season history.</div>';out.innerHTML=state.compareResultHtml;}
-    finally{state.compareBusy=false;}
+  const a=document.getElementById('cmp-a'),b=document.getElementById('cmp-b'),out=document.getElementById('cmp-out');if(a&&[...a.options].some(o=>o.value===state.compareA))a.value=state.compareA;if(b&&[...b.options].some(o=>o.value===state.compareB))b.value=state.compareB;a?.addEventListener('change',()=>{state.compareA=a.value});b?.addEventListener('change',()=>{state.compareB=b.value});
+  document.getElementById('cmp-go').onclick=async()=>{state.compareA=a.value;state.compareB=b.value;if(a.value===b.value){state.compareResultHtml='<div class="error-box">Choose two different drivers.</div>';out.innerHTML=state.compareResultHtml;return;}state.compareBusy=true;
+    const [cr,cq]=cachedCompareSeasonData(),cs=cacheGet('compare-sprints')||[];state.compareResultHtml=buildCompareResultHtml(a.value,b.value,cr,cq,Array.isArray(cs)?cs:[]);out.innerHTML=state.compareResultHtml+'<div class="compare-refresh-note muted">Refreshing detailed H2H data…</div>';
+    try{const [[races,quali],sprints]=await Promise.all([getCompareSeasonData(),getCompareSprints()]);state.compareResultHtml=buildCompareResultHtml(a.value,b.value,races,quali,sprints);out.innerHTML=state.compareResultHtml;}catch{out.querySelector?.('.compare-refresh-note')?.remove?.();}finally{state.compareBusy=false;}
   };
 }
 function simpleDriverStats(id,races,quali,byId){
@@ -2243,7 +2266,6 @@ function setupSwipeNavigation(){
   };
   const swipeBlockedTarget=el=>{
     const interactive=el?.closest?.('button,input,select,textarea,.tabs,.news-source-tabs,.weather-session-tabs,.leaflet-container,.car-schematic [data-no-swipe],[data-no-swipe]');
-    // More is made almost entirely from menu buttons: let a horizontal drag start on those cards.
     if(interactive?.classList?.contains('menu-card'))return false;
     return !!interactive;
   };

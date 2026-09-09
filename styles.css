@@ -407,11 +407,6 @@ body.launch-revealing #app-shell{opacity:1;transform:none;filter:none}
 .schematic-pin-marker:after{content:"";position:absolute;left:3px;top:-2px;width:12px;height:1px;background:color-mix(in srgb,var(--car-accent) 76%,#fff);transform:rotate(-34deg);transform-origin:left center;opacity:.9}
 .schematic-pin-marker>span{position:absolute;left:10px;top:-19px;width:19px;height:19px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--car-accent) 88%,#151515);border:1.5px solid #fff;box-shadow:0 2px 7px #0009;font-size:8.5px;line-height:1;font-weight:1000;color:#fff}
 .schematic-pin-marker:hover,.schematic-pin-marker:focus-visible{transform:none;box-shadow:none}.schematic-pin-marker:hover>span,.schematic-pin-marker:focus-visible>span{transform:scale(1.13)}
-/* A real inner scroller prevents Driver Compare from being trapped by the document/gesture layer on Android PWAs. */
-body.compare-route{overflow:hidden;overscroll-behavior:none}
-body.compare-route .view{height:calc(100dvh - 66px);overflow:hidden;padding-bottom:0}
-.compare-page{height:100%;overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;touch-action:pan-y!important;padding-bottom:calc(110px + env(safe-area-inset-bottom));scrollbar-width:none}
-.compare-page::-webkit-scrollbar{display:none}.compare-page *:not(select):not(button):not(input){touch-action:pan-y}
 /* More cards are swipe surfaces as well as tap targets. */
 .menu-card{touch-action:pan-y pinch-zoom}
 @media(max-width:620px){.schematic-pin-marker>span{width:18px;height:18px;left:9px;top:-18px;font-size:8px}.schematic-pin-marker:before{width:34px;height:34px;left:-17px;top:-17px}}
@@ -433,14 +428,6 @@ body.compare-route,.compare-page,#cmp-out,.compare-deck,.compare-deck>*,.compare
 .driver-photo,.profile-photo-holder img,.compare-driver-photo{image-rendering:auto;transform:translateZ(0);backface-visibility:hidden}
 .driver-photo-holder,.driver-photo{height:132px}.profile-photo-holder,.profile-photo-holder img{height:265px}
 @media(max-width:620px){.schematic-pin-marker>span{width:15px;height:15px;left:9px;top:-15px;font-size:7px}.compare-radar{aspect-ratio:1/1}.driver-photo-holder,.driver-photo{height:128px}.profile-photo-holder,.profile-photo-holder img,.profile-avatar{height:225px}}
-
-/* v1.21.0 phone-QA fixes */
-/* Driver Compare uses the document's native scroller. The previous nested 100dvh scroller
-   could leave a large unpainted/dead area on Android PWAs. */
-body.compare-route{overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior-y:contain!important}
-body.compare-route .view{height:auto!important;min-height:calc(100dvh - 66px)!important;overflow:visible!important;padding-bottom:calc(112px + env(safe-area-inset-bottom))!important}
-body.compare-route .compare-page{height:auto!important;min-height:0!important;overflow:visible!important;padding-bottom:8px!important;touch-action:pan-y!important;overscroll-behavior-y:auto!important}
-body.compare-route #cmp-out{overflow:visible!important;min-height:0!important}
 
 /* Immersive circuit experience */
 .circuit-experience-card{overflow:hidden;padding:14px;background:linear-gradient(145deg,#131313,#0b0b0b)}
@@ -469,3 +456,11 @@ body:not(.compare-route) .compare-page .compare-deck,body:not(.compare-route) .c
 .circuit-sector-marker circle{fill:#0b0b0b;stroke:#ffbd2e;stroke-width:3;vector-effect:non-scaling-stroke}.circuit-sector-marker text,.circuit-sf-marker text{fill:#ffda7a;font-size:17px;font-weight:1000;paint-order:stroke;stroke:#070707;stroke-width:4px}.circuit-sf-marker line{stroke:#fff;stroke-width:3;vector-effect:non-scaling-stroke}.circuit-sf-marker text{fill:#fff}
 .circuit-straight-head{display:flex;justify-content:space-between;align-items:center;margin:12px 2px 7px}.circuit-straight-head span{font-size:9px;font-weight:1000;letter-spacing:1.25px;color:var(--red)}.circuit-straight-head small{font-size:7px;color:#676767;font-weight:900;letter-spacing:.7px}.circuit-straight-strip{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:0 2px 4px;scroll-snap-type:x proximity}.circuit-straight-strip::-webkit-scrollbar{display:none}.circuit-straight-card{flex:0 0 154px;border:1px solid #2a2a2a;border-radius:14px;background:#0d0d0d;padding:10px;scroll-snap-align:start}.circuit-straight-card small,.circuit-straight-card b,.circuit-straight-card span{display:block}.circuit-straight-card small{font-size:7px;color:#777;font-weight:950;letter-spacing:1px}.circuit-straight-card b{font-size:12px;margin-top:4px}.circuit-straight-card span{font-size:9px;color:#999;margin-top:3px}.circuit-official-unavailable{width:100%;padding:12px 14px;border:1px solid #38301e;background:#1d180d;border-radius:14px;color:#d9b960;font-size:10px;line-height:1.45}
 @media(max-width:620px){.circuit-stage{height:50vh;min-height:340px}.circuit-turn-marker circle{r:10px}.circuit-turn-marker text{font-size:9px}.circuit-sector-marker text,.circuit-sf-marker text{font-size:14px}.circuit-straight-card{flex-basis:142px}}
+
+
+/* v1.23.0 physical-device reliability fixes */
+body.compare-page-active{overflow-x:hidden!important;overflow-y:auto!important;height:auto!important;min-height:100%!important;overscroll-behavior-y:auto!important;touch-action:pan-y!important}
+body.compare-page-active .view{contain:none!important;height:auto!important;min-height:calc(100vh - 66px)!important;overflow:visible!important;overflow-x:hidden!important;padding-bottom:calc(118px + env(safe-area-inset-bottom))!important;touch-action:pan-y!important}
+.compare-page,#cmp-out{display:block!important;width:100%!important;max-width:100%!important;height:auto!important;max-height:none!important;min-height:0!important;overflow:visible!important;overflow-x:hidden!important;touch-action:pan-y!important;overscroll-behavior-y:auto!important;contain:none!important}
+.compare-page *:not(select):not(button):not(input){touch-action:pan-y}
+.compare-loading-note{font-size:10px;text-align:center;margin-top:8px}

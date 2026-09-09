@@ -22,6 +22,14 @@
       x:Number(c.trackPosition?.x),y:Number(c.trackPosition?.y)
     })).filter(c=>c.number>0&&finite(c.x)&&finite(c.y)).sort((a,b)=>(a.distanceM??1e12)-(b.distanceM??1e12)||a.number-b.number||a.letter.localeCompare(b.letter));
   }
+  function tracingCorners(payload){
+    const nums=payload?.CornerNumber||[],xs=payload?.X||[],ys=payload?.Y||[],angles=payload?.Angle||[],dist=payload?.Distance||[];
+    return nums.map((n,i)=>({number:Number(n||0),letter:'',angle:Number(angles[i]||0),distanceM:finite(dist[i])?Number(dist[i]):null,x:Number(xs[i]),y:Number(ys[i])})).filter(c=>c.number>0&&finite(c.x)&&finite(c.y)).sort((a,b)=>(a.distanceM??1e12)-(b.distanceM??1e12)||a.number-b.number);
+  }
+  function catmullClosed(points,steps=16){
+    const p=points||[];if(p.length<3)return p;const out=[];const n=p.length;
+    for(let i=0;i<n;i++){const p0=p[(i-1+n)%n],p1=p[i],p2=p[(i+1)%n],p3=p[(i+2)%n];for(let s=0;s<steps;s++){const tt=s/steps,t2=tt*tt,t3=t2*tt;out.push({x:.5*((2*p1.x)+(-p0.x+p2.x)*tt+(2*p0.x-5*p1.x+4*p2.x-p3.x)*t2+(-p0.x+3*p1.x-3*p2.x+p3.x)*t3),y:.5*((2*p1.y)+(-p0.y+p2.y)*tt+(2*p0.y-5*p1.y+4*p2.y-p3.y)*t2+(-p0.y+3*p1.y-3*p2.y+p3.y)*t3)});}}out.push({...out[0]});return out;
+  }
   function trackFromLocations(rows,maxPoints=900){
     const pts=(rows||[]).filter(r=>finite(r.x)&&finite(r.y)&&r.date).map(r=>({x:Number(r.x),y:Number(r.y),date:r.date,t:new Date(r.date).getTime()})).filter(p=>Number.isFinite(p.t)).sort((a,b)=>a.t-b.t);
     if(pts.length<=maxPoints)return pts;const step=Math.ceil(pts.length/maxPoints);return pts.filter((_,i)=>i%step===0||i===pts.length-1);
@@ -47,11 +55,14 @@
     const sectors=[];if(i1>=0)sectors.push({...pt[i1],label:'S1',progress:sectorProgress[0]});if(i2>=0)sectors.push({...pt[i2],label:'S2',progress:sectorProgress[1]});
     return {track:pt,turns,sectors,start:pt[0],full:[0,0,pr.W,pr.H],trackLengthPx:total};
   }
+  function cornerOnlyExperience(cornerRows,rotation,lapLengthM){
+    if(!cornerRows?.length)return null;const pr=projector(cornerRows,rotation),pc=cornerRows.map(pr.point),track=catmullClosed(pc,18),length=Number(lapLengthM||0)||Math.max(...cornerRows.map(c=>Number(c.distanceM||0)),1);const turns=pc.map((c,i)=>{const raw=cornerRows[i],progress=raw.distanceM!==null&&length>0?Math.max(0,Math.min(1,raw.distanceM/length)):i/pc.length;return {...c,turn:raw.number,label:`${raw.number}${raw.letter||''}`,letter:raw.letter,distanceM:raw.distanceM,progress,sector:null};});return {track,turns,sectors:[],start:track[0]||pc[0],full:[0,0,pr.W,pr.H],trackLengthPx:cumulative(track).at(-1)||1};
+  }
   function longStraights(cornerRows,lapLengthM,count=4){
     const cs=(cornerRows||[]).filter(c=>c.distanceM!==null).slice().sort((a,b)=>a.distanceM-b.distanceM);if(cs.length<2||!lapLengthM)return[];const out=[];
     for(let i=0;i<cs.length;i++){const a=cs[i],b=cs[(i+1)%cs.length],end=i===cs.length-1?Number(lapLengthM)+b.distanceM:b.distanceM,gap=end-a.distanceM;if(gap>120)out.push({from:`${a.number}${a.letter||''}`,to:`${b.number}${b.letter||''}`,distanceM:gap});}
     return out.sort((a,b)=>b.distanceM-a.distanceM).slice(0,count);
   }
   function focusBox(full,point,zoom=2.35){const [x0,y0,w0,h0]=full,w=w0/zoom,h=h0/zoom,cx=Math.max(x0+w/2,Math.min(x0+w0-w/2,point.x)),cy=Math.max(y0+h/2,Math.min(y0+h0-h/2,point.y));return [cx-w/2,cy-h/2,w,h];}
-  return {norm,meetingScore,bestMeeting,chooseSession,corners,trackFromLocations,nearestIndexByTime,officialExperience,longStraights,focusBox};
+  return {norm,meetingScore,bestMeeting,chooseSession,corners,tracingCorners,trackFromLocations,nearestIndexByTime,officialExperience,cornerOnlyExperience,longStraights,focusBox};
 });

@@ -17,6 +17,7 @@ F1 Hub is an unofficial personal project and is not affiliated with Formula 1, t
 - Jina Reader — readable-text extraction of publicly accessible FIA PDFs for the in-app steward document view.
 - RacingNews365 and timepenalty — public penalty/reprimand reference pages; F1 Hub stores only small derived counts/expiry information and links back to sources.
 - Wikipedia / Wikimedia Commons — fallback driver profile images when an OpenF1 headshot is unavailable. Arvid Lindblad uses the CC0 Wikimedia Commons image “Arvid lindblad Budapest 2026.jpg”.
+- TracingInsights public season archives — raw `corners.json` fallback for circuit corner numbers, coordinates, rotation and distance when the direct circuit metadata endpoint is unavailable. The repositories credit FastF1/MultiViewer for this data and are Apache-2.0 licensed.
 - MasterPlay007/F1-Track-Layouts-SVG — circuit SVG assets (repository states CC0-1.0).
 - F1DB circuit assets — used for newer layouts where specified; CC BY 4.0.
 - RainViewer Weather Maps API — in-app historical/latest radar tiles (past two hours); RainViewer attribution is shown on the map.
